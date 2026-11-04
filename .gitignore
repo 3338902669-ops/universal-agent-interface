@@ -1,0 +1,44 @@
+# Local credentials and lab state
+.lab-tokens/
+data/
+logs/
+evidence/
+runtime/
+fixtures/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+*.token
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Logs, temporary files, and editor state
+*.log
+*.tmp
+*.temp
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+
+# Packaging and coverage output
+build/
+dist/
+*.egg-info/
+.coverage
+htmlcov/
