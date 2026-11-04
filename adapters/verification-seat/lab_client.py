@@ -19,7 +19,7 @@ def build_envelope(
     *,
     instruction: str,
     interface_id: str | None = None,
-    capability: str | None = "codex_exec",
+    capability: str | None = "runtime_exec",
     resource_key: str | None = None,
     params: dict[str, Any] | None = None,
     timeout_s: float = 120,
@@ -61,7 +61,7 @@ class LabClient:
     async def connect(self) -> None:
         self.nc = await nats.connect(
             self.nats_url,
-            name="tianshu-interface-v02-acceptance-driver",
+            name="verification-seat-interface-v02-acceptance-driver",
             connect_timeout=2,
             max_reconnect_attempts=-1,
             reconnect_time_wait=1,
@@ -90,7 +90,7 @@ class LabClient:
         self, value: dict[str, Any]
     ) -> dict[str, Any]:
         request = {
-            "issuer": "tianshu-lab-simulator",
+            "issuer": "verification-seat-lab-simulator",
             **value,
         }
         return await self.request("hub.approval.issue", request, timeout=5)

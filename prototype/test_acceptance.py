@@ -728,7 +728,7 @@ Get-CimInstance Win32_Process | Where-Object {{
         await asyncio.sleep(2.0)
         envelope = build_envelope(
             instruction="lease recovery and late result",
-            capability="codex_exec",
+            capability="runtime_exec",
             params={"test_mode": "late", "late_after_s": 3, "_lease_seconds": 1.1},
             timeout_s=10,
         )
@@ -951,7 +951,7 @@ Get-CimInstance Win32_Process | Where-Object {{
             request = {
                 "task_id": task_id,
                 "verdict": word,
-                "checker": "codex-self-test",
+                "checker": "runtime-self-test",
                 "evidence_level": "E3",
                 "deterministic_check": "result file and hash present",
                 "independent_review": "自检，未独立验证",
@@ -961,7 +961,7 @@ Get-CimInstance Win32_Process | Where-Object {{
             if word == "未核":
                 request.update(
                     {
-                        "owner": "codex",
+                        "owner": "runtime",
                         "min_action": f"open {self.base / 'evidence' / 'acceptance-results.json'} and complete independent review",
                         "due_at": "2026-11-06T03:00:00+08:00",
                     }
@@ -970,10 +970,10 @@ Get-CimInstance Win32_Process | Where-Object {{
             if result.get("ok"):
                 accepted.append(word)
         invalid_word = await client.verdict(
-            {"task_id": task_ids[0], "verdict": "完成", "checker": "codex-self-test"}
+            {"task_id": task_ids[0], "verdict": "完成", "checker": "runtime-self-test"}
         )
         incomplete_unverified = await client.verdict(
-            {"task_id": task_ids[1], "verdict": "未核", "checker": "codex-self-test"}
+            {"task_id": task_ids[1], "verdict": "未核", "checker": "runtime-self-test"}
         )
         ledger_verdicts = [
             row
@@ -996,19 +996,19 @@ Get-CimInstance Win32_Process | Where-Object {{
             {"accepted": accepted, "observed": observed, "invalid_word_response": invalid_word, "incomplete_unverified": incomplete_unverified},
         )
 
-    async def test_10_real_codex_chain(self) -> tuple[bool, str, list[str], dict[str, Any]]:
+    async def test_10_real_runtime_chain(self) -> tuple[bool, str, list[str], dict[str, Any]]:
         client = await self.client()
         interface_id, handle = self.start_interface(
-            "codex-main",
+            "runtime-main",
             heartbeat_s=0.5,
             task_heartbeat_s=2,
             event_timeout_s=2,
             max_concurrency=1,
-            executor="codex",
+            executor="runtime",
         )
         await self.wait_registration(interface_id, timeout_s=20)
         instruction = (
-            "Reply with exactly INTERFACE_V02_CODEX_OK. "
+            "Reply with exactly INTERFACE_V02_RUNTIME_OK. "
             "Do not run commands, use tools, or modify any files."
         )
         envelope = build_envelope(
@@ -1020,23 +1020,23 @@ Get-CimInstance Win32_Process | Where-Object {{
         )
         submit = await client.submit(envelope)
         task_id = submit["task_id"]
-        self.task_ids["real_codex"] = task_id
+        self.task_ids["real_runtime"] = task_id
         state = await client.wait_state(task_id, TERMINAL, timeout_s=180)
         await self.wait_until(
             lambda: self.pending_events(interface_id),
             lambda pending: len(pending) == 0,
             timeout_s=30,
-            label="real codex outbox drain",
+            label="real runtime outbox drain",
         )
         pointer = state.get("result_pointer") or {}
         result_path = file_uri_to_path(pointer["uri"])
         stdout_text = result_path.read_text(encoding="utf-8", errors="replace")
         operations = read_jsonl(self.interface_dir(interface_id) / "operations.jsonl")
-        codex_ops = [
+        runtime_ops = [
             row
             for row in operations
             if row.get("task_id") == task_id
-            and row.get("action") == "invoke_codex_exec"
+            and row.get("action") == "invoke_runtime_exec"
         ]
         state_rows = self.ledger_for("TASK_STATE", task_id)
         states = [row["state"] for row in state_rows]
@@ -1051,15 +1051,15 @@ Get-CimInstance Win32_Process | Where-Object {{
             state["state"] == "SUCCEEDED"
             and all(item in states for item in expected_states)
             and all(item in event_kinds for item in ["accepted", "claimed", "progress", "result_ready", "completed"])
-            and "INTERFACE_V02_CODEX_OK" in stdout_text
-            and bool(codex_ops)
+            and "INTERFACE_V02_RUNTIME_OK" in stdout_text
+            and bool(runtime_ops)
             and result_hash_matches
             and bool(connection_rows)
             and bool(hub_connection_rows)
         )
         return (
             passed,
-            f"real codex chain terminal={state['state']}; state_path={states}; event_kinds={event_kinds}; result_sha_match={result_hash_matches}",
+            f"real runtime chain terminal={state['state']}; state_path={states}; event_kinds={event_kinds}; result_sha_match={result_hash_matches}",
             [
                 str(self.base / "data" / "ledger.jsonl"),
                 str(self.interface_dir(interface_id) / "operations.jsonl"),
@@ -1074,8 +1074,8 @@ Get-CimInstance Win32_Process | Where-Object {{
                 "states": states,
                 "event_kinds": event_kinds,
                 "result_pointer": pointer,
-                "codex_operation_count": len(codex_ops),
-                "stdout_contains_expected": "INTERFACE_V02_CODEX_OK" in stdout_text,
+                "runtime_operation_count": len(runtime_ops),
+                "stdout_contains_expected": "INTERFACE_V02_RUNTIME_OK" in stdout_text,
             },
         )
 
@@ -1239,7 +1239,7 @@ Get-CimInstance Win32_Process | Where-Object {{
         await self.run_case(7, "资源串行与跨资源并发", command, self.test_07_resource_and_concurrency)
         await self.run_case(8, "超时分层", command, self.test_08_timeout_layers)
         await self.run_case(9, "裁定写入", command, self.test_09_verdict_vocabulary)
-        await self.run_case(10, "真 codex 全链与账目互证", command, self.test_10_real_codex_chain)
+        await self.run_case(10, "真 runtime 全链与账目互证", command, self.test_10_real_runtime_chain)
         await self.run_case(4, "断网 5 分钟补投", command, self.test_04_outage_five_minutes)
         await self.cleanup_interfaces()
         process_info = self.process_snapshot()

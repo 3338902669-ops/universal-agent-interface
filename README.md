@@ -44,6 +44,7 @@ Requirements:
 - PowerShell on Windows
 - NATS Server 2.x
 - The Python package `nats-py`
+- A compatible agent CLI exposed through `AGENT_RUNTIME_EXECUTABLE` when exercising the runtime-backed acceptance case
 
 Install the Python dependency and make the NATS executable available:
 

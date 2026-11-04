@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Process-level acceptance harness for specification v0.2 and tianshu edges."""
+"""Process-level acceptance harness for specification v0.2 and verification-seat edges."""
 
 from __future__ import annotations
 
@@ -744,7 +744,7 @@ Get-CimInstance Win32_Process | Where-Object {{
         await asyncio.sleep(2.0)
         envelope = build_envelope(
             instruction="lease recovery and late result",
-            capability="codex_exec",
+            capability="runtime_exec",
             params={
                 "test_mode": "late",
                 "late_after_s": 4,
@@ -971,7 +971,7 @@ Get-CimInstance Win32_Process | Where-Object {{
             request = {
                 "task_id": task_id,
                 "verdict": word,
-                "checker": "codex-self-test",
+                "checker": "runtime-self-test",
                 "evidence_level": "E3",
                 "deterministic_check": "result file and hash present",
                 "independent_review": "自检，未独立验证",
@@ -981,7 +981,7 @@ Get-CimInstance Win32_Process | Where-Object {{
             if word == "未核":
                 request.update(
                     {
-                        "owner": "codex",
+                        "owner": "runtime",
                         "min_action": f"open {self.base / 'evidence' / 'acceptance-results.json'} and complete independent review",
                         "due_at": "2026-11-06T03:00:00+08:00",
                     }
@@ -990,10 +990,10 @@ Get-CimInstance Win32_Process | Where-Object {{
             if result.get("ok"):
                 accepted.append(word)
         invalid_word = await client.verdict(
-            {"task_id": task_ids[0], "verdict": "完成", "checker": "codex-self-test"}
+            {"task_id": task_ids[0], "verdict": "完成", "checker": "runtime-self-test"}
         )
         incomplete_unverified = await client.verdict(
-            {"task_id": task_ids[1], "verdict": "未核", "checker": "codex-self-test"}
+            {"task_id": task_ids[1], "verdict": "未核", "checker": "runtime-self-test"}
         )
         ledger_verdicts = [
             row
@@ -1016,26 +1016,26 @@ Get-CimInstance Win32_Process | Where-Object {{
             {"accepted": accepted, "observed": observed, "invalid_word_response": invalid_word, "incomplete_unverified": incomplete_unverified},
         )
 
-    async def test_10_tianshu_readonly_chain(
+    async def test_10_verification_seat_readonly_chain(
         self,
     ) -> tuple[bool, str, list[str], dict[str, Any]]:
         client = await self.client()
         interface_id, handle = self.start_interface(
-            "tianshu-readonly",
+            "verification-seat-readonly",
             heartbeat_s=0.5,
             task_heartbeat_s=1,
             event_timeout_s=2,
             max_concurrency=1,
-            executor="tianshu",
+            executor="verification-seat",
         )
         await self.wait_registration(interface_id, timeout_s=20)
         payload = {
-            "subject": "tianshu lab contract v0.2",
+            "subject": "verification-seat lab contract v0.2",
             "status": "ready",
             "readonly": True,
         }
         fixture_path = (
-            self.base / "fixtures" / f"tianshu-readonly-{self.run_id}.json"
+            self.base / "fixtures" / f"verification-seat-readonly-{self.run_id}.json"
         )
         atomic_write_json(
             fixture_path,
@@ -1079,13 +1079,13 @@ Get-CimInstance Win32_Process | Where-Object {{
         )
         submit = await client.submit(envelope)
         task_id = submit["task_id"]
-        self.task_ids["tianshu_readonly"] = task_id
+        self.task_ids["verification-seat_readonly"] = task_id
         state = await client.wait_state(task_id, TERMINAL, timeout_s=30)
         await self.wait_until(
             lambda: self.pending_events(interface_id),
             lambda pending: len(pending) == 0,
             timeout_s=30,
-            label="tianshu outbox drain",
+            label="verification-seat outbox drain",
         )
         pointer = state.get("result_pointer") or {}
         result_path = file_uri_to_path(pointer["uri"])
@@ -1111,7 +1111,7 @@ Get-CimInstance Win32_Process | Where-Object {{
             state["state"] == "SUCCEEDED"
             and all(item in states for item in expected_states)
             and all(item in event_kinds for item in ["accepted", "claimed", "progress", "result_ready", "completed"])
-            and result.get("role") == "tianshu"
+            and result.get("role") == "verification-seat"
             and result.get("capability") == "readonly_verification"
             and result.get("deterministic_result") == "通过"
             and all(result.get("deterministic_checks", {}).values())
@@ -1124,7 +1124,7 @@ Get-CimInstance Win32_Process | Where-Object {{
         )
         return (
             passed,
-            f"tianshu read-only chain terminal={state['state']}; state_path={states}; event_kinds={event_kinds}; source_unchanged={source_unchanged}; result_sha_match={result_hash_matches}",
+            f"verification-seat read-only chain terminal={state['state']}; state_path={states}; event_kinds={event_kinds}; source_unchanged={source_unchanged}; result_sha_match={result_hash_matches}",
             [
                 str(self.base / "data" / "ledger.jsonl"),
                 str(self.interface_dir(interface_id) / "operations.jsonl"),
@@ -1158,7 +1158,7 @@ Get-CimInstance Win32_Process | Where-Object {{
             task_heartbeat_s=1,
             event_timeout_s=2,
             max_concurrency=1,
-            executor="tianshu",
+            executor="verification-seat",
         )
         await self.wait_registration(interface_id)
 
@@ -1501,9 +1501,9 @@ Get-CimInstance Win32_Process | Where-Object {{
         await self.run_case(9, "裁定写入", command, self.test_09_verdict_vocabulary)
         await self.run_case(
             10,
-            "tianshu 只读核验全链与账目互证",
+            "verification-seat 只读核验全链与账目互证",
             command,
-            self.test_10_tianshu_readonly_chain,
+            self.test_10_verification_seat_readonly_chain,
         )
         await self.run_case(
             11,

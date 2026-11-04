@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codex-seat interface process for the v0.2 contract prototype."""
+"""Executor interface process for the v0.2 contract prototype."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import contextlib
 import json
 import mimetypes
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -238,7 +237,7 @@ class InterfaceProcess:
         disable_heartbeat: bool,
         suppress_echo: bool,
         executor: str,
-        codex_executable: str,
+        runtime_executable: str,
     ):
         self.base = base
         self.interface_id = interface_id
@@ -252,7 +251,7 @@ class InterfaceProcess:
         self.disable_heartbeat = disable_heartbeat
         self.suppress_echo = suppress_echo
         self.executor = executor
-        self.codex_executable = codex_executable
+        self.runtime_executable = runtime_executable
         self.data_dir = base / "runtime" / "interfaces" / safe_id(interface_id)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.work_dir = self.data_dir / "work"
@@ -298,18 +297,18 @@ class InterfaceProcess:
         )
 
     def capability_card(self) -> dict[str, Any]:
-        if self.executor == "tianshu":
+        if self.executor == "verification-seat":
             capability = {
                 "name": "readonly_verification",
-                "description": "Tianshu-style read-only evidence verification in the v0.2 lab.",
+                "description": "Read-only evidence verification for the v0.2 lab.",
                 "input_types": ["application/json", "text/plain"],
                 "output_types": ["application/json"],
                 "max_concurrency": self.max_concurrency,
                 "duration_class": "short",
             }
             agent = {
-                "vendor": "tianshu-lab",
-                "runtime": "tianshu-contract-adapter",
+                "vendor": "verification-seat-lab",
+                "runtime": "verification-seat-contract-adapter",
                 "version": "0.2-lab",
             }
             sandbox = {
@@ -321,21 +320,21 @@ class InterfaceProcess:
             }
         else:
             capability = {
-                "name": "codex_exec",
-                "description": "Execute a codex CLI task and return a result pointer.",
+                "name": "runtime_exec",
+                "description": "Execute a runtime CLI task and return a result pointer.",
                 "input_types": ["text/plain", "application/json"],
                 "output_types": ["application/json", "text/plain"],
                 "max_concurrency": self.max_concurrency,
                 "duration_class": "medium",
             }
             agent = {
-                "vendor": "OpenAI",
-                "runtime": "codex-cli",
-                "version": "0.147.0",
+                "vendor": "external-runtime",
+                "runtime": "runtime-cli",
+                "version": "runtime-provided",
             }
             sandbox = {
                 "isolated": True,
-                "type": "codex-read-only-sandbox",
+                "type": "runtime-read-only-sandbox",
                 "network": "disabled-by-task-policy",
                 "code_execution_allowed": True,
             }
@@ -384,7 +383,7 @@ class InterfaceProcess:
 
         self.nc = await nats.connect(
             self.nats_url,
-            name=f"tianshu-interface-v02-{safe_id(self.interface_id)}",
+            name=f"verification-seat-interface-v02-{safe_id(self.interface_id)}",
             connect_timeout=2,
             reconnect_time_wait=1,
             max_reconnect_attempts=-1,
@@ -855,8 +854,8 @@ class InterfaceProcess:
             test_mode = params.get("test_mode")
             content: bytes
             media_type = "text/plain; charset=utf-8"
-            if self.executor == "tianshu":
-                content, media_type = await self.execute_tianshu(envelope)
+            if self.executor == "verification-seat":
+                content, media_type = await self.execute_verification_seat(envelope)
             elif test_mode in {"sleep", "late"}:
                 if test_mode == "late":
                     sleep_s = (
@@ -897,8 +896,8 @@ class InterfaceProcess:
                     task_id,
                     "completed",
                 )
-            elif self.executor == "codex":
-                content, media_type = await self.execute_codex(envelope)
+            elif self.executor == "runtime":
+                content, media_type = await self.execute_runtime(envelope)
             else:
                 raise RuntimeError("test executor requires params.test_mode")
 
@@ -987,10 +986,10 @@ class InterfaceProcess:
             self.active_tasks.pop(task_id, None)
             asyncio.create_task(self.force_flush_outbox())
 
-    async def execute_tianshu(
+    async def execute_verification_seat(
         self, envelope: dict[str, Any]
     ) -> tuple[bytes, str]:
-        """Run a tianshu-style read-only verification or a lab external action."""
+        """Run a verification-seat-style read-only verification or a lab external action."""
 
         task_id = envelope["task_id"]
         params = (
@@ -1001,22 +1000,22 @@ class InterfaceProcess:
         mode = params.get("mode", "readonly_verify")
         if mode == "readonly_verify":
             if envelope.get("cls") != "readonly":
-                raise RuntimeError("tianshu_readonly_requires_readonly_cls")
+                raise RuntimeError("verification_seat_readonly_requires_readonly_cls")
             if len(envelope.get("attachments") or []) != 1:
-                raise RuntimeError("tianshu_readonly_requires_one_attachment")
+                raise RuntimeError("verification_seat_readonly_requires_one_attachment")
             attachment = envelope["attachments"][0]
             source_path = file_uri_to_path(attachment["uri"])
             source_before = sha256_file(source_path)
             if source_before != attachment["sha256"]:
-                raise RuntimeError("tianshu_source_hash_mismatch")
+                raise RuntimeError("verification_seat_source_hash_mismatch")
             try:
                 document = json.loads(source_path.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise RuntimeError(
-                    f"tianshu_source_invalid:{type(error).__name__}"
+                    f"verification_seat_source_invalid:{type(error).__name__}"
                 ) from error
             if not isinstance(document, dict):
-                raise RuntimeError("tianshu_source_not_object")
+                raise RuntimeError("verification_seat_source_not_object")
             payload = document.get("payload")
             expected_payload = document.get("expected_payload_sha256")
             rules = document.get("rules")
@@ -1052,7 +1051,7 @@ class InterfaceProcess:
             result = {
                 "contract_version": CONTRACT_VERSION,
                 "task_id": task_id,
-                "role": "tianshu",
+                "role": "verification-seat",
                 "capability": "readonly_verification",
                 "instruction_received": envelope["instruction"],
                 "source_uri": attachment["uri"],
@@ -1065,7 +1064,7 @@ class InterfaceProcess:
                 "independent_verification": "not performed",
             }
             if not deterministic_ok:
-                raise RuntimeError("tianshu_deterministic_check_failed")
+                raise RuntimeError("verification_seat_deterministic_check_failed")
             return canonical_json(result), "application/json"
 
         if mode == "approval_action":
@@ -1086,7 +1085,7 @@ class InterfaceProcess:
                 "decision": envelope["params"]["approval"]["decision"],
                 "credential_id": envelope["params"]["approval"]["credential_id"],
                 "performed_at": now_iso(),
-                "scope": "tianshu-lab-only",
+                "scope": "verification-seat-lab-only",
             }
             action_path.write_bytes(canonical_json(action_record))
             self.operation(
@@ -1100,23 +1099,23 @@ class InterfaceProcess:
                     "task_id": task_id,
                     "action_id": action_id,
                     "action_result": "completed",
-                    "scope": "tianshu-lab-only",
+                    "scope": "verification-seat-lab-only",
                 }
             ), "application/json"
 
-        raise RuntimeError(f"tianshu_mode_unknown:{mode}")
+        raise RuntimeError(f"verification_seat_mode_unknown:{mode}")
 
-    async def execute_codex(
+    async def execute_runtime(
         self, envelope: dict[str, Any]
     ) -> tuple[bytes, str]:
         task_id = envelope["task_id"]
         workdir = self.work_dir / task_id
         workdir.mkdir(parents=True, exist_ok=True)
-        stdout_path = self.results_dir / task_id / "codex.stdout.jsonl"
-        stderr_path = self.results_dir / task_id / "codex.stderr.log"
+        stdout_path = self.results_dir / task_id / "runtime.stdout.jsonl"
+        stderr_path = self.results_dir / task_id / "runtime.stderr.log"
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         command = [
-            self.codex_executable,
+            self.runtime_executable,
             "exec",
             "--skip-git-repo-check",
             "--sandbox",
@@ -1129,8 +1128,8 @@ class InterfaceProcess:
         ]
         self.operation(
             task_id,
-            "invoke_codex_exec",
-            self.codex_executable,
+            "invoke_runtime_exec",
+            self.runtime_executable,
             "started",
         )
         timeout_s = float(envelope["timeout_s"])
@@ -1152,12 +1151,12 @@ class InterfaceProcess:
         stderr_path.write_bytes(completed.stderr)
         self.operation(
             task_id,
-            "invoke_codex_exec",
-            self.codex_executable,
+            "invoke_runtime_exec",
+            self.runtime_executable,
             f"exit={completed.returncode};stdout_bytes={len(completed.stdout)};stderr_bytes={len(completed.stderr)}",
         )
         if completed.returncode != 0:
-            raise RuntimeError(f"codex_exec_exit_{completed.returncode}")
+            raise RuntimeError(f"runtime_exec_exit_{completed.returncode}")
         return completed.stdout, "application/json"
 
     async def resume_durable_tasks(self) -> None:
@@ -1229,7 +1228,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--nats-url",
         default=os.environ.get(
-            "TIANSHU_INTERFACE_V02_NATS_URL", "nats://127.0.0.1:43331"
+            "VERIFICATION_SEAT_INTERFACE_V02_NATS_URL", "nats://127.0.0.1:43331"
         ),
     )
     parser.add_argument("--heartbeat-s", type=float, default=2.0)
@@ -1239,13 +1238,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--disable-heartbeat", action="store_true")
     parser.add_argument("--suppress-echo", action="store_true")
     parser.add_argument(
-        "--executor", choices=["codex", "test", "tianshu"], default="test"
+        "--executor", choices=["runtime", "test", "verification-seat"], default="test"
     )
     parser.add_argument(
-        "--codex-executable",
-        default=shutil.which("codex") or "codex.exe",
+        "--runtime-executable",
+        default=os.environ.get("AGENT_RUNTIME_EXECUTABLE"),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.executor == "runtime" and not args.runtime_executable:
+        parser.error(
+            "runtime executor requires --runtime-executable or "
+            "AGENT_RUNTIME_EXECUTABLE"
+        )
+    return args
 
 
 def main() -> int:
@@ -1262,7 +1267,7 @@ def main() -> int:
         disable_heartbeat=args.disable_heartbeat,
         suppress_echo=args.suppress_echo,
         executor=args.executor,
-        codex_executable=args.codex_executable,
+        runtime_executable=args.runtime_executable,
     )
     try:
         asyncio.run(process.run())

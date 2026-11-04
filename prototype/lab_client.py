@@ -19,7 +19,7 @@ def build_envelope(
     *,
     instruction: str,
     interface_id: str | None = None,
-    capability: str | None = "codex_exec",
+    capability: str | None = "runtime_exec",
     resource_key: str | None = None,
     params: dict[str, Any] | None = None,
     timeout_s: float = 120,

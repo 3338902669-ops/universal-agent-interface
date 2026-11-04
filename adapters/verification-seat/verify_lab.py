@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recompute deterministic checks over the completed tianshu v0.2 lab run."""
+"""Recompute deterministic checks over the completed verification-seat v0.2 lab run."""
 
 from __future__ import annotations
 
@@ -181,7 +181,7 @@ def run(base: Path) -> int:
             "success_ack_count": len(success_acks),
             "pending_ids": sorted(pending_ids),
         },
-        "tianshu_readonly_result": {
+        "verification-seat_readonly_result": {
             "ok": result_path.is_file()
             and sha256(result_path) == result_pointer.get("sha256")
             and item10["output"].get("source_unchanged") is True
@@ -275,7 +275,7 @@ def run(base: Path) -> int:
     result = {
         "run_id": run_id,
         "contract_version": "0.2",
-        "role": "tianshu-lab",
+        "role": "verification-seat-lab",
         "overall": "通过" if overall else "不通过",
         "exit_code": 0 if overall else 1,
         "evidence_level": "E1-可复现自测；E3-未独立验证",
@@ -302,7 +302,7 @@ def run(base: Path) -> int:
                 "bytes": (base / "data" / "ledger.jsonl").stat().st_size,
                 "sha256": sha256(base / "data" / "ledger.jsonl"),
             },
-            "tianshu_result": {
+            "verification-seat_result": {
                 "path": str(result_path),
                 "bytes": result_path.stat().st_size,
                 "sha256": sha256(result_path),

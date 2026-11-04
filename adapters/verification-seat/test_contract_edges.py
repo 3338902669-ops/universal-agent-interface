@@ -101,7 +101,7 @@ async def run_checks(base: Path, nats_url: str) -> int:
         )
         invalid_target["target"] = {
             "interface_id": interface_id,
-            "capability": "codex_exec",
+            "capability": "runtime_exec",
         }
         target_response = await client.submit(invalid_target)
         checks["target_exactly_one"] = {

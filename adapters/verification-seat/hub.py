@@ -205,7 +205,7 @@ class Hub:
 
         self.nc = await nats.connect(
             self.nats_url,
-            name="tianshu-interface-v02-hub",
+            name="verification-seat-interface-v02-hub",
             connect_timeout=3,
             reconnect_time_wait=1,
             max_reconnect_attempts=-1,
@@ -805,7 +805,7 @@ class Hub:
         if (
             not request
             or required - request.keys()
-            or request.get("issuer") != "tianshu-lab-simulator"
+            or request.get("issuer") != "verification-seat-lab-simulator"
         ):
             self.json_response(
                 msg,
@@ -843,7 +843,7 @@ class Hub:
             action_id=grant["action_id"],
             binding_sha256=grant["binding_sha256"],
             expires_at=grant["expires_at"],
-            issuer="tianshu-lab-simulator",
+            issuer="verification-seat-lab-simulator",
             production_credential=False,
         )
         self.json_response(msg, {"ok": True, "approval": grant})
@@ -1521,7 +1521,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--nats-url",
         default=os.environ.get(
-            "TIANSHU_INTERFACE_V02_NATS_URL", "nats://127.0.0.1:43331"
+            "VERIFICATION_SEAT_INTERFACE_V02_NATS_URL", "nats://127.0.0.1:43331"
         ),
     )
     parser.add_argument("--lease-seconds", type=float, default=300.0)
