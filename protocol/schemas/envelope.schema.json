@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:universal-agent-interface:envelope:v1",
+  "title": "Universal Agent Interface Task Envelope v1",
+  "description": "Canonical task submission envelope. Serialized envelopes must not exceed 262144 bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "envelope_id",
+    "task_id",
+    "idempotency_key",
+    "target",
+    "instruction",
+    "timeout_s",
+    "cls",
+    "created_by",
+    "created_at",
+    "trace_id"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "envelope_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "task_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "interface_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "interface_id"
+          ]
+        },
+        {
+          "required": [
+            "capability"
+          ]
+        }
+      ]
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 262144
+    },
+    "skill_ref": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        }
+      ]
+    },
+    "resource_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "params": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactPointer"
+      }
+    },
+    "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "cls": {
+      "enum": [
+        "readonly",
+        "reversible",
+        "external"
+      ]
+    },
+    "priority": {
+      "enum": [
+        "high",
+        "standard",
+        "low"
+      ],
+      "default": "standard"
+    },
+    "approval": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/approvalCredential"
+        }
+      ]
+    },
+    "created_by": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "trace_id": {
+      "$ref": "#/$defs/uuid"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "cls"
+        ],
+        "properties": {
+          "cls": {
+            "const": "external"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "approval"
+        ],
+        "properties": {
+          "approval": {
+            "$ref": "#/$defs/approvalCredential"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "approval": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "artifactPointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri",
+        "sha256",
+        "bytes",
+        "media_type"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[^/]+/[^/]+$"
+        }
+      }
+    },
+    "approvalCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credential_id",
+        "approval_record_id",
+        "task_id",
+        "envelope_sha256",
+        "approver_role",
+        "decision",
+        "decided_at",
+        "expires_at",
+        "single_use"
+      ],
+      "properties": {
+        "credential_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "approval_record_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "task_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "envelope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "approver_role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "decision": {
+          "const": "approved"
+        },
+        "decided_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "single_use": {
+          "const": true
+        }
+      }
+    }
+  }
+}

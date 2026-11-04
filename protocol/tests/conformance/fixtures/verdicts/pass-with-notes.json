@@ -1,0 +1,45 @@
+{
+  "record_version": "1.0",
+  "verdict_id": "60000000-0000-4000-8000-000000000001",
+  "task_id": "60000000-0000-4000-8000-000000000002",
+  "verdict": "带注通过",
+  "decided_by_role": "verification-role",
+  "decided_at": "2026-11-04T12:31:00Z",
+  "basis": {
+    "deterministic_check": {
+      "status": "pass",
+      "summary": "All required fields and hashes matched.",
+      "evidence_refs": [
+        "artifact://evidence/deterministic-2"
+      ]
+    },
+    "independent_verification": {
+      "status": "pass",
+      "summary": "The independent verifier confirmed the content.",
+      "evidence_refs": [
+        "artifact://evidence/independent-2"
+      ],
+      "self_check": false
+    },
+    "physical_readback": {
+      "status": "pass",
+      "summary": "The original file was read back.",
+      "evidence_refs": [
+        "artifact://evidence/readback-2"
+      ]
+    }
+  },
+  "evidence": [
+    {
+      "uri": "artifact://outputs/result-2",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "bytes": 256,
+      "media_type": "text/plain"
+    }
+  ],
+  "operation_ledger_refs": [],
+  "notes": [
+    "The report uses a future retention policy; this does not block delivery."
+  ],
+  "reason": null
+}

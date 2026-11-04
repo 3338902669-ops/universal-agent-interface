@@ -1,0 +1,16 @@
+{
+  "contract_version": "1.0",
+  "envelope_id": "40000000-0000-4000-8000-000000000001",
+  "task_id": "40000000-0000-4000-8000-000000000002",
+  "idempotency_key": "sample-two-targets-0001",
+  "target": {
+    "interface_id": "interface-generic-1",
+    "capability": "read-artifact"
+  },
+  "instruction": "This target is intentionally ambiguous.",
+  "timeout_s": 60,
+  "cls": "readonly",
+  "created_by": "orchestrator-role",
+  "created_at": "2026-11-04T12:00:00Z",
+  "trace_id": "40000000-0000-4000-8000-000000000003"
+}

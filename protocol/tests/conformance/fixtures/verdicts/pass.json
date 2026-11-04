@@ -1,0 +1,42 @@
+{
+  "record_version": "1.0",
+  "verdict_id": "50000000-0000-4000-8000-000000000001",
+  "task_id": "50000000-0000-4000-8000-000000000002",
+  "verdict": "通过",
+  "decided_by_role": "verification-role",
+  "decided_at": "2026-11-04T12:30:00Z",
+  "basis": {
+    "deterministic_check": {
+      "status": "pass",
+      "summary": "Artifact exists and its SHA-256 matches.",
+      "evidence_refs": [
+        "artifact://evidence/deterministic-1"
+      ]
+    },
+    "independent_verification": {
+      "status": "pass",
+      "summary": "A verifier that did not execute the task checked the content.",
+      "evidence_refs": [
+        "artifact://evidence/independent-1"
+      ],
+      "self_check": false
+    },
+    "physical_readback": {
+      "status": "pass",
+      "summary": "The stored artifact was read back from its source.",
+      "evidence_refs": [
+        "artifact://evidence/readback-1"
+      ]
+    }
+  },
+  "evidence": [
+    {
+      "uri": "artifact://outputs/result-1",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "bytes": 128,
+      "media_type": "application/json"
+    }
+  ],
+  "operation_ledger_refs": [],
+  "reason": null
+}

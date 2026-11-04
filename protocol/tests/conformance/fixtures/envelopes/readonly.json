@@ -1,0 +1,30 @@
+{
+  "contract_version": "1.0",
+  "envelope_id": "10000000-0000-4000-8000-000000000001",
+  "task_id": "10000000-0000-4000-8000-000000000002",
+  "idempotency_key": "sample-readonly-0001",
+  "target": {
+    "interface_id": "interface-generic-1"
+  },
+  "instruction": "Read the referenced artifact and report its checksum. Preserve punctuation: \\\"quoted\\\" / slash / line break.",
+  "skill_ref": null,
+  "resource_key": null,
+  "params": {
+    "artifact": "sample"
+  },
+  "attachments": [
+    {
+      "uri": "artifact://inputs/sample.txt",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bytes": 17,
+      "media_type": "text/plain"
+    }
+  ],
+  "timeout_s": 120,
+  "cls": "readonly",
+  "priority": "standard",
+  "approval": null,
+  "created_by": "orchestrator-role",
+  "created_at": "2026-11-04T12:00:00Z",
+  "trace_id": "10000000-0000-4000-8000-000000000003"
+}

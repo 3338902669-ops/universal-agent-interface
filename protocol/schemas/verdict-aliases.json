@@ -1,0 +1,24 @@
+{
+  "alias_version": "1.0",
+  "canonical_values": [
+    "通过",
+    "带注通过",
+    "条件通过",
+    "不通过",
+    "未核",
+    "作废"
+  ],
+  "aliases": [
+    {
+      "historical_value": "驳回",
+      "canonical_value": "不通过",
+      "operation": "read_normalize_only"
+    }
+  ],
+  "constraints": {
+    "allow_on_read": true,
+    "normalize_before_validation": true,
+    "allow_on_write": false,
+    "allow_in_output": false
+  }
+}

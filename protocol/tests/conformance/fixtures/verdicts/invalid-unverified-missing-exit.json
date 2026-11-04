@@ -1,0 +1,28 @@
+{
+  "record_version": "1.0",
+  "verdict_id": "80000000-0000-4000-8000-000000000001",
+  "task_id": "80000000-0000-4000-8000-000000000002",
+  "verdict": "未核",
+  "decided_by_role": "orchestrator-role",
+  "decided_at": "2026-11-04T12:33:00Z",
+  "basis": {
+    "deterministic_check": {
+      "status": "not_performed",
+      "summary": "No checks have run.",
+      "evidence_refs": []
+    },
+    "independent_verification": {
+      "status": "not_performed",
+      "summary": "No independent verification has run.",
+      "evidence_refs": []
+    },
+    "physical_readback": {
+      "status": "not_performed",
+      "summary": "No readback has run.",
+      "evidence_refs": []
+    }
+  },
+  "evidence": [],
+  "operation_ledger_refs": [],
+  "reason": null
+}

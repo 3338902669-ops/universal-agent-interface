@@ -1,0 +1,35 @@
+{
+  "record_version": "1.0",
+  "verdict_id": "70000000-0000-4000-8000-000000000001",
+  "task_id": "70000000-0000-4000-8000-000000000002",
+  "verdict": "未核",
+  "decided_by_role": "orchestrator-role",
+  "decided_at": "2026-11-04T12:32:00Z",
+  "basis": {
+    "deterministic_check": {
+      "status": "pass",
+      "summary": "The artifact pointer and hash are present.",
+      "evidence_refs": [
+        "artifact://evidence/deterministic-3"
+      ]
+    },
+    "independent_verification": {
+      "status": "not_performed",
+      "summary": "Independent verification has not started.",
+      "evidence_refs": []
+    },
+    "physical_readback": {
+      "status": "not_performed",
+      "summary": "Readback waits for independent verification.",
+      "evidence_refs": []
+    }
+  },
+  "evidence": [],
+  "operation_ledger_refs": [],
+  "unverified_exit": {
+    "owner_role": "independent-verification-role",
+    "minimum_action": "Run the conformance command and compare the two expected counts.",
+    "due_at": "2026-11-06T15:30:00Z"
+  },
+  "reason": null
+}

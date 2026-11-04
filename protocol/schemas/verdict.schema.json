@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:universal-agent-interface:verdict:v1",
+  "title": "Universal Agent Interface Verdict Record v1",
+  "description": "Canonical verdict record. The verdict enum contains only the six canonical values.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record_version",
+    "verdict_id",
+    "task_id",
+    "verdict",
+    "decided_by_role",
+    "decided_at",
+    "basis",
+    "evidence",
+    "operation_ledger_refs"
+  ],
+  "properties": {
+    "record_version": {
+      "const": "1.0"
+    },
+    "verdict_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "task_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "verdict": {
+      "enum": [
+        "通过",
+        "带注通过",
+        "条件通过",
+        "不通过",
+        "未核",
+        "作废"
+      ]
+    },
+    "decided_by_role": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "decided_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deterministic_check",
+        "independent_verification",
+        "physical_readback"
+      ],
+      "properties": {
+        "deterministic_check": {
+          "$ref": "#/$defs/checkStage"
+        },
+        "independent_verification": {
+          "$ref": "#/$defs/checkStage"
+        },
+        "physical_readback": {
+          "$ref": "#/$defs/checkStage"
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactPointer"
+      }
+    },
+    "operation_ledger_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactPointer"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "unmet_conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_role",
+        "conditions",
+        "due_at"
+      ],
+      "properties": {
+        "owner_role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "unverified_exit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_role",
+        "minimum_action",
+        "due_at"
+      ],
+      "properties": {
+        "owner_role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "minimum_action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "const": "带注通过"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "notes"
+        ],
+        "properties": {
+          "notes": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "const": "条件通过"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "unmet_conditions"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "const": "未核"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "unverified_exit"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "enum": [
+              "不通过",
+              "作废"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "artifactPointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri",
+        "sha256",
+        "bytes",
+        "media_type"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[^/]+/[^/]+$"
+        }
+      }
+    },
+    "checkStage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "summary",
+        "evidence_refs"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "pass",
+            "fail",
+            "not_applicable",
+            "not_performed"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1
+          }
+        },
+        "self_check": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

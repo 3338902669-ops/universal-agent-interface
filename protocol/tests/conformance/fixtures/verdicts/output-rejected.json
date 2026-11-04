@@ -1,0 +1,28 @@
+{
+  "record_version": "1.0",
+  "verdict_id": "a0000000-0000-4000-8000-000000000001",
+  "task_id": "a0000000-0000-4000-8000-000000000002",
+  "verdict": "驳回",
+  "decided_by_role": "verification-role",
+  "decided_at": "2026-11-04T12:34:00Z",
+  "basis": {
+    "deterministic_check": {
+      "status": "fail",
+      "summary": "Intentional invalid output fixture.",
+      "evidence_refs": []
+    },
+    "independent_verification": {
+      "status": "fail",
+      "summary": "Intentional invalid output fixture.",
+      "evidence_refs": []
+    },
+    "physical_readback": {
+      "status": "fail",
+      "summary": "Intentional invalid output fixture.",
+      "evidence_refs": []
+    }
+  },
+  "evidence": [],
+  "operation_ledger_refs": [],
+  "reason": "This alias is forbidden on the output path."
+}
