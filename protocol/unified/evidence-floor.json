@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:universal-agent-interface:evidence-floor:v1",
+  "title": "Shared Evidence Floor Table v1",
+  "description": "解决 governed-agent-runtime F-GAR-05：rigor(L1–L3) 与 cls(readonly/reversible/external) 是两个正交轴，floor 取两者较严者。三仓共引本表，不得各自演化。",
+  "axes": {
+    "rigor": {
+      "meaning": "证据强度下限（Orchestra L1–L3）",
+      "allowed_grades": {
+        "L1": ["E1", "E2", "E3", "E4"],
+        "L2": ["E1", "E2"],
+        "L3": ["E1"]
+      }
+    },
+    "cls": {
+      "meaning": "副作用等级（UAI readonly/reversible/external）",
+      "min_grade": {
+        "readonly": "E3",
+        "reversible": "E2",
+        "external": "E1"
+      },
+      "operation_ledger": {
+        "readonly": [],
+        "reversible": ["intent", "confirmed"],
+        "external": ["intent", "confirmed", "unknown"]
+      },
+      "approval_required": {
+        "readonly": false,
+        "reversible": false,
+        "external": true
+      }
+    }
+  },
+  "grade_strength": { "E1": 4, "E2": 3, "E3": 2, "E4": 1 },
+  "rules": {
+    "floor": "allowed = rigor.allowed_grades ∩ { g : strength(g) >= strength(cls.min_grade) }",
+    "payload_required": "rigor=L3 或 cls=external",
+    "independent_reader_required": "rigor=L3",
+    "approval_required": "cls=external",
+    "no_self_verification": "verifier != implementer（L2 及以上）",
+    "three_failed_verifications": "治理态转 blocked，拒绝认领/完成/审批",
+    "verdict_vocabulary": ["通过", "带注通过", "条件通过", "不通过", "未核", "作废"],
+    "legacy_alias": { "驳回": "不通过" }
+  },
+  "sources": {
+    "rigor": "agent-orchestra conformance.json E5: L1 any grade, L2 E1/E2, L3 E1",
+    "cls": "universal-agent-interface contract-v1.md §3 (cls) + §7 (approval)",
+    "gap_closed": "governed-agent-runtime KNOWN-FINDINGS.md F-GAR-05"
+  }
+}
