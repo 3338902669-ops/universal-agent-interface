@@ -139,3 +139,33 @@ python check-cross-repo-vocab.py     # 0 = 一致，1 = 有漂移
 
 它会同时读：UAI 的 `contract-v1.md` 与两套 schema、A2A 官方 `a2a.proto`、AO 的 `conformance.json`（41 条）、GAR 的 `KNOWN-FINDINGS.md`。
 任一侧改词表而另两侧没跟，这条命令就红。
+
+## 架构待完善项的落地（P0 批次）
+
+对应 `~/.shared/ARCH-TODO-LIST-20261112.md`。
+
+| 项 | 状态 | 实现 | 自检 |
+|---|---|---|---|
+| **A-02** A2A 入站 → 中枢 | **已闭环** | `inbound_bridge.py`：A2A 请求 → 信封 → `hub.submit` → 受理 → 账本 QUEUED | `test_a02_inbound.py` **8/8** |
+| **A-03** 投影接出站 | **已实现** | `a2a_server.py` 新增 SSE `/tasks/<id>/events`，跟随账本增量推送 | `test_a03_stream.py` **6/6** |
+| **A-04** streaming | **已实现** | 同上（text/event-stream） | 同上 |
+| **A-05** 版本协商 | **已实现（最小）** | `inbound.py` 显式 `contract_version`；不匹配由中枢明确拒绝，不静默降级 | `test_a02_inbound.py` 首条 |
+| **A-01 / C-03** 跨域身份 | **接口 + 判定规则** | `identity.py`：LocalToken / OIDC / mTLS 可插拔；**无验证器不得升级 authenticated** | `test_identity.py` **10/10** |
+| A-07 / A-08 / C-01 / D-02~05 | **已落地** | `protocol/unified/*` + `protocol/NOT-GUARANTEED.md` | `test_protocol_specs.py` **30/30** |
+
+### 版本协商是怎么回事
+
+实验室原型实现的是契约 **v0.2**，本仓契约已是 **v1**。桥第一次投递被中枢以
+`unsupported_contract_version` 拒绝——**这正是该有的行为**：不静默降级，不假装兼容。
+
+现在 `inbound.py` 支持显式声明目标版本（`1.0` / `0.2`），`test_a02_inbound.py` 同时验证：
+- 用 `1.0` 投 v0.2 中枢 → 明确拒绝
+- 用 `0.2` 投 → 受理成功
+
+### 身份为什么只能到 `asserted`
+
+`identity.py` 里的 OIDC / mTLS 验证器在**参考实现中不做验签**，所以它们只会返回 `asserted` 并附 reason
+（`jwt_signature_not_verified_in_reference_impl` / `certificate_chain_not_verified_in_reference_impl`）。
+
+这是有意的：**宁可承认没验证，也不假装验证过**。接真 IdP 后把这两个分支换成真验签，`approver_authenticity`
+才允许变 `authenticated`。
