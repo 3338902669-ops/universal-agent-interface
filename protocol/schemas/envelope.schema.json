@@ -28,6 +28,13 @@
     "task_id": {
       "$ref": "#/$defs/uuid"
     },
+    "context_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A2A Task.contextId 的对应字段：同一会话上下文内的多轮任务共享此值。v1.1 新增（A-06）。"
+    },
     "idempotency_key": {
       "type": "string",
       "minLength": 8,
