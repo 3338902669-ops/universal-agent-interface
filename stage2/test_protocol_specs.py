@@ -134,6 +134,36 @@ def main() -> int:
     else:
         check("D-02 文档含全部 6 个裁定词", True, "")
 
+
+    # ---------- B-03：SLA / 结算 / 驻留声明 ----------
+    sl_schema = load(os.path.join(UNI, "service-level.schema.json"))
+    try:
+        from jsonschema import Draft202012Validator
+        Draft202012Validator.check_schema(sl_schema)
+        slv = Draft202012Validator(sl_schema)
+        check("B-03 service-level schema 是合法 Draft 2020-12", True, "")
+    except ImportError:
+        slv = None
+        check("B-03 service-level schema 是合法 Draft 2020-12", False, "缺少 jsonschema 库")
+    except Exception as e:
+        slv = None
+        check("B-03 service-level schema 是合法 Draft 2020-12", False, str(e))
+
+    if slv is not None:
+        sl_ok = {
+            "sla": {"response_s": 5, "completion_s": 120, "availability": "0.99"},
+            "billing": {"unit": "task", "rate_ref": None},
+            "data_residency": {"region": "eu-west-1", "max_classification": "internal"},
+        }
+        check("B-03 合法样本通过", not list(slv.iter_errors(sl_ok)), "")
+        sl_bad = {
+            "sla": {"response_s": 5, "completion_s": 120, "availability": "0.99"},
+            "billing": {"unit": "task", "rate_ref": None},
+            "data_residency": {"max_classification": "internal"},
+        }
+        check("B-03 缺 region 被拒", bool(list(slv.iter_errors(sl_bad))), "")
+
+
     print("\nRESULT: %d/%d passed" % (len(PASSES), len(PASSES) + len(FAILS)))
     return 0 if not FAILS else 1
 
