@@ -100,3 +100,42 @@ message_texts    {'待核验': 40, '通过': 5, '带注通过': 5, '条件通过
 - 本轮全部数据为本机实跑（E1）。
 - 三个实质缺陷（D1/D2/D3）、一处桥自身重复、以及多轮测试缺陷，均由**独立 subagent**（全新上下文）复跑与抽查代码发现，属 **E2（体系内互检）**。
 - 修复后的二次、三次复验同样由该 subagent 执行。
+
+## 跨仓统一模型（v0.1）
+
+对应三仓联合审计（`~/.shared/JOINT-ARCHITECTURE-AUDIT.md`）指出的 P0：三个仓库各有一套状态/证据/审批语义。
+
+| 文件 | 作用 | 自检 |
+|---|---|---|
+| `unified.py` | 统一模型实现：两轴状态、证据等级×载荷、floor 表、审批 scope | `test_unified.py` **33/33** |
+| `check-cross-repo-vocab.py` | 跨仓词表一致性检查（读三仓真实文件比对） | **17/17**，且**故意漂移时返回 1** |
+
+### 两条轴，不是一条
+
+```text
+execution_state  (QUEUED…CANCELLED)   由 UAI 拥有
+governance_state (active/blocked/closed) 由 AO 拥有
+
+SUCCEEDED 不决定治理关闭；治理关闭由裁定决定：
+  通过/带注通过/作废 → closed
+  不通过            → active（打回重做）
+  未核              → blocked（缺出口）
+```
+
+这解决了审计里最硬的冲突——Orchestra 的 `done`/`blocked` 与 UAI 的 `SUCCEEDED`/`FAILED` 被当成同一词表。
+
+### 证据 = 等级 × 载荷
+
+- AO 的 E1–E4 是**等级**（跑过没有、谁核的）
+- UAI 的四字段是**载荷**（是不是那一份）
+- `floor(rigor, cls) = max(rigor_floor, cls_floor)`；`rigor`(L1–L3) 与 `cls`(readonly/reversible/external) **正交**
+
+### 一条命令验三仓
+
+```powershell
+cd stage2
+python check-cross-repo-vocab.py     # 0 = 一致，1 = 有漂移
+```
+
+它会同时读：UAI 的 `contract-v1.md` 与两套 schema、A2A 官方 `a2a.proto`、AO 的 `conformance.json`（41 条）、GAR 的 `KNOWN-FINDINGS.md`。
+任一侧改词表而另两侧没跟，这条命令就红。
