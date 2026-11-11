@@ -1,0 +1,97 @@
+"""P1 批次自检：A-06 context_id / B-01 三轮阻塞 / A-11 改派。
+
+跑法：python test_p1_batch.py ；退出码 0 = 全通过。
+"""
+
+from __future__ import annotations
+
+import sys
+
+import inbound
+import projection as P
+import reassign as R
+import unified as U
+
+PASSES, FAILS = [], []
+
+
+def check(name, cond, detail=""):
+    (PASSES if cond else FAILS).append(name)
+    print("%s  %-62s %s" % ("PASS" if cond else "FAIL", name, detail))
+
+
+def expect(fn, name, needle):
+    try:
+        fn()
+    except (R.ReassignError, U.ModelError, inbound.InboundError) as e:
+        check(name, needle in str(e), str(e)[:60])
+        return
+    check(name, False, "未抛错")
+
+
+def main() -> int:
+    # ---------- A-06 context_id ----------
+    req = {"contextId": "ctx-00000001",
+           "message": {"messageId": "m-0000001", "parts": [{"text": "hello"}]}}
+    env = inbound.envelope_from_a2a(req, created_by="u", target_interface="dsh")
+    check("A-06 A2A contextId → 信封 context_id", env.get("context_id") == "ctx-00000001",
+          str(env.get("context_id")))
+
+    env2 = inbound.envelope_from_a2a(
+        {"message": {"messageId": "m-0000002", "contextId": "ctx-00000002",
+                     "parts": [{"text": "hi"}]}},
+        created_by="u", target_interface="dsh")
+    check("A-06 contextId 在 message 上也能取到", env2.get("context_id") == "ctx-00000002", "")
+
+    task = P.project_task(task_id="task-0001", internal_state="RUNNING",
+                          context_id=env["context_id"])
+    check("A-06 投影到 A2A Task.context_id", task.get("context_id") == "ctx-00000001", "")
+
+    env3 = inbound.envelope_from_a2a(
+        {"message": {"messageId": "m-0000003", "parts": [{"text": "no ctx"}]}},
+        created_by="u", target_interface="dsh")
+    check("A-06 无 contextId 时为 None（不伪造）", env3.get("context_id") is None, "")
+
+    # ---------- B-01 三轮阻塞 ----------
+    check("B-01 0–2 次失败时不阻塞",
+          all(U.derive_governance_state("SUCCEEDED", "不通过", failed_verifications=n) != "blocked"
+              for n in (0, 1, 2)), "")
+    check("B-01 第 3 次失败即 blocked",
+          U.derive_governance_state("SUCCEEDED", "不通过", failed_verifications=3) == "blocked", "")
+    check("B-01 阻塞优先于裁定结论",
+          U.derive_governance_state("SUCCEEDED", "通过", failed_verifications=3) == "blocked",
+          "通过也不能覆盖阻塞")
+    check("B-01 执行态非终态时同样适用",
+          U.derive_governance_state("RUNNING", None, failed_verifications=4) == "blocked", "")
+
+    # ---------- A-11 改派 ----------
+    lease = R.Lease(task_id="task-0002", interface_id="dsh", attempt=1, fence=1)
+    new, ev = R.reassign(lease, to_interface="tianshu", reason="dsh crashed",
+                         execution_state="CLAIMED", governance_state="active", now="2026-11-12T00:00:00Z")
+    check("A-11 围栏递增", new.fence == lease.fence + 1, "%d→%d" % (lease.fence, new.fence))
+    check("A-11 尝试号递增", new.attempt == lease.attempt + 1, "")
+    check("A-11 改派事件记录被撤销的旧围栏",
+          ev["revoked_fencing_generation"] == lease.fence and ev["fencing_generation"] == new.fence, "")
+    check("A-11 事件带原因（C3）", ev["reason"] == "dsh crashed", "")
+
+    r_old = R.accept_result(new, fence=1, attempt=1)
+    check("A-11 旧围栏写入被拒", r_old["accepted"] is False and r_old["reason"] == "fencing_stale",
+          r_old["reason"])
+    r_new = R.accept_result(new, fence=2, attempt=2)
+    check("A-11 新围栏写入被接受", r_new["accepted"] is True, "")
+
+    expect(lambda: R.reassign(lease, to_interface="tianshu", reason="  "),
+           "A-11 无原因改派被拒", "reason")
+    expect(lambda: R.reassign(lease, to_interface="dsh", reason="x"),
+           "A-11 改派给当前持有者被拒", "current_holder")
+    expect(lambda: R.reassign(lease, to_interface="tianshu", reason="x", governance_state="blocked"),
+           "A-11 阻塞任务不可改派（C2）", "blocked")
+    expect(lambda: R.reassign(lease, to_interface="tianshu", reason="x", execution_state="SUCCEEDED"),
+           "A-11 终态任务不可改派", "terminal")
+
+    print("\nRESULT: %d/%d passed" % (len(PASSES), len(PASSES) + len(FAILS)))
+    return 0 if not FAILS else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
