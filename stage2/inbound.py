@@ -131,6 +131,10 @@ def envelope_from_a2a(
     params = _params_of(parts)
     attachments = _attachments_of(parts)
 
+    # A-06：A2A 的 contextId 可能在 request 或 message 上，两处都认
+    context_id = (request.get("contextId") or request.get("context_id")
+                  or message.get("contextId") or message.get("context_id"))
+
     if contract_version not in SUPPORTED_CONTRACT_VERSIONS:
         raise InboundError("unsupported_contract_version: %r（支持 %s）"
                            % (contract_version, SUPPORTED_CONTRACT_VERSIONS))
@@ -139,6 +143,7 @@ def envelope_from_a2a(
         "contract_version": contract_version,
         "envelope_id": str(uuid.uuid4()),
         "task_id": task_id or str(uuid.uuid4()),
+        "context_id": context_id,
         "idempotency_key": derive_idempotency_key(subject, message_id, instruction, params),
         "target": {"interface_id": target_interface} if target_interface else {"capability": target_capability},
         "instruction": instruction,
