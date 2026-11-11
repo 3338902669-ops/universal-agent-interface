@@ -77,7 +77,8 @@ def assert_writable_verdict(value: str) -> str:
 
 # ---------- 治理状态派生 ----------
 def derive_governance_state(execution_state: str, verdict: str | None = None,
-                            blocked_reason: str | None = None) -> str:
+                            blocked_reason: str | None = None,
+                            failed_verifications: int = 0) -> str:
     """执行状态 + 裁定 → 治理状态。这是两根轴之间的唯一桥。
 
     规则：
@@ -92,6 +93,9 @@ def derive_governance_state(execution_state: str, verdict: str | None = None,
     """
     if execution_state not in EXECUTION_STATES:
         raise ModelError("unknown_execution_state: %r" % (execution_state,))
+    # B-01：三轮核验失败即阻塞（对应 AO 的 C1/C2）
+    if failed_verifications >= 3:
+        return "blocked"
     if blocked_reason:
         return "blocked"
 
