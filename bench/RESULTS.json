@@ -1,0 +1,55 @@
+{
+  "faults": {
+    "loss": 0.1,
+    "dup": 0.1,
+    "crash_after": 0.08,
+    "stale": 0.08,
+    "false_complete": 0.1,
+    "timeout": 0.05
+  },
+  "tasks": 2000,
+  "seed": 20261112,
+  "rows": [
+    {
+      "tier": "T0",
+      "tasks": 2000,
+      "lost": 182,
+      "duplicate_exec": 187,
+      "wrong_accepted": 296,
+      "stuck": 237,
+      "recovered_ok": 1285,
+      "ops_per_task": 2.812
+    },
+    {
+      "tier": "T1",
+      "tasks": 2000,
+      "lost": 0,
+      "duplicate_exec": 169,
+      "wrong_accepted": 326,
+      "stuck": 89,
+      "recovered_ok": 1416,
+      "ops_per_task": 3.176
+    },
+    {
+      "tier": "T2",
+      "tasks": 2000,
+      "lost": 0,
+      "duplicate_exec": 169,
+      "wrong_accepted": 189,
+      "stuck": 0,
+      "recovered_ok": 1642,
+      "ops_per_task": 3.442
+    },
+    {
+      "tier": "T3",
+      "tasks": 2000,
+      "lost": 0,
+      "duplicate_exec": 0,
+      "wrong_accepted": 0,
+      "stuck": 0,
+      "recovered_ok": 2000,
+      "ops_per_task": 3.536
+    }
+  ],
+  "self_check_errors": []
+}
