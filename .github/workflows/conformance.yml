@@ -41,6 +41,7 @@ jobs:
           python test_p1_batch.py
           python test_a09_singleton.py
           python test_b02_ao_refs.py
+          python test_p2_batch.py
 
       - name: Cross-repo vocabulary consistency
         working-directory: stage2
