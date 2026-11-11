@@ -120,7 +120,18 @@
     "attachments": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/artifactPointer"
+        "$ref": "#/$defs/artifactPointer",
+        "properties": {
+          "classification": {
+            "enum": [
+              "public",
+              "internal",
+              "confidential",
+              "restricted"
+            ],
+            "description": "数据分级（B-04）"
+          }
+        }
       }
     },
     "timeout_s": {
