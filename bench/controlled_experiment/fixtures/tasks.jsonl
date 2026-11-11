@@ -1,0 +1,6 @@
+{"id":"T01","prompt":"UAI 六值裁定中，表示核验通过但附有注记的裁定词是什么？只输出裁定词本身，不要解释。","answer":"带注通过","scoring":{"fn":"exact_match","normalize":["strip","collapse_ws"]}}
+{"id":"T02","prompt":"Compute the SHA-256 digest (lowercase hex, 64 characters) of this exact UTF-8 string and output only the digest: universal-agent-interface/e-02/t02","answer":"997802e23905e64e8ff0c2c7ce5d5335e45a9339c1513094085a556d91c4e8ac","scoring":{"fn":"sha256_hex","normalize":["strip","lower"]}}
+{"id":"T03","prompt":"把执行态 QUEUED 投影到 A2A TaskState 时，正确的枚举名是什么？只输出枚举名。","answer":"TASK_STATE_SUBMITTED","scoring":{"fn":"exact_match","normalize":["strip","collapse_ws"]}}
+{"id":"T04","prompt":"E1 证据记录除身份与时间外，还必须同时具备哪三个字段？用英文蛇形字段名、逗号分隔输出（顺序不限）。","answer":"command,exit_code,revision","scoring":{"fn":"set_csv","normalize":["strip","lower"],"sep":","}}
+{"id":"T05","prompt":"只读（cls=readonly）且 rigor=L3 的任务，是否允许仅用 E3 等级收口？只输出 yes 或 no。","answer":"no","scoring":{"fn":"exact_match","normalize":["strip","lower"]}}
+{"id":"T06","prompt":"SUCCEEDED 且裁定为「未核」时，governance_state 应是什么？只输出小写英文状态名。","answer":"blocked","scoring":{"fn":"exact_match","normalize":["strip","lower"]}}

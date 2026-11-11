@@ -42,3 +42,7 @@ dist/
 *.egg-info/
 .coverage
 htmlcov/
+
+# E-02 published fixtures (root 'fixtures/' would otherwise ignore them)
+!bench/controlled_experiment/fixtures/
+!bench/controlled_experiment/fixtures/**

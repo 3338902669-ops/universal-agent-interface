@@ -1,0 +1,20 @@
+{
+  "run_id": "run-20261111T234041Z-d5cb962a",
+  "started_at": "2026-11-11T23:40:41.642090+00:00",
+  "backend": "stub",
+  "model": "stub-deterministic",
+  "conditions": [
+    "without_orchestration",
+    "with_orchestration"
+  ],
+  "tasks_path": "/workspace/universal-agent-interface/bench/controlled_experiment/fixtures/tasks.jsonl",
+  "tasks_sha256": "bd15505e68f9bd2af0891e75d983ddcefdcb84f811e054ca4f128e7ade9486f1",
+  "scoring_sha256": "84cbecdd71f0a7d8297b24d5b9bf44a00eb9bd4b32431d41cbd87852e0d8e9a6",
+  "skill_pack_sha256": "c15266a4dfa72fcde8df2d3bacd13bcffdcc95639d760ff40b481088e05cfc69",
+  "git_sha": "468c54dcb800e74404b426986a6a439a5cd90476",
+  "python": "3.13.5",
+  "platform": "Linux-6.12.113+-x86_64-with-glibc2.41",
+  "timeout_s": 120.0,
+  "api_key_present": false,
+  "url_present": false
+}
