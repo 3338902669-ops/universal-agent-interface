@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:universal-agent-interface:evidence:v1",
+  "title": "Universal Agent Interface Evidence Record v1",
+  "description": "证据 = 等级（Orchestra E1–E4）× 载荷（UAI uri/sha256/bytes/media_type）。两者都必填其一，等级决定可信度，载荷决定可核性。",
+  "type": "object",
+  "required": ["evidence_id", "task_id", "grade", "asserted_by", "asserted_at"],
+  "properties": {
+    "evidence_id": { "type": "string", "minLength": 8 },
+    "task_id": { "type": "string", "minLength": 8 },
+    "grade": { "enum": ["E1", "E2", "E3", "E4"] },
+    "asserted_by": { "type": "string", "minLength": 1 },
+    "asserted_at": { "type": "string", "minLength": 10 },
+    "command": { "type": ["string", "null"] },
+    "exit_code": { "type": ["integer", "null"] },
+    "revision": { "type": ["string", "null"] },
+    "peer": { "type": ["string", "null"] },
+    "read_by": { "type": ["string", "null"] },
+    "note": { "type": ["string", "null"] },
+    "payload": {
+      "type": "object",
+      "required": ["uri", "sha256", "bytes", "media_type"],
+      "properties": {
+        "uri": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "media_type": { "type": "string" }
+      }
+    },
+    "rigor": { "enum": ["L1", "L2", "L3"] },
+    "cls": { "enum": ["readonly", "reversible", "external"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "grade": { "const": "E1" } } },
+      "then": {
+        "required": ["command", "exit_code", "revision"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "exit_code": { "type": "integer" },
+          "revision": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "grade": { "const": "E2" } } },
+      "then": {
+        "required": ["peer"],
+        "properties": { "peer": { "type": "string", "minLength": 1 } }
+      }
+    },
+    {
+      "if": { "properties": { "grade": { "enum": ["E3", "E4"] } } },
+      "then": {
+        "required": ["note"],
+        "properties": { "note": { "type": "string", "minLength": 1 } }
+      }
+    },
+    {
+      "if": { "required": ["rigor"], "properties": { "rigor": { "const": "L3" } } },
+      "then": {
+        "required": ["payload", "read_by"],
+        "properties": { "grade": { "const": "E1" } }
+      }
+    },
+    {
+      "if": { "required": ["cls"], "properties": { "cls": { "const": "external" } } },
+      "then": {
+        "required": ["payload"],
+        "properties": { "grade": { "const": "E1" } }
+      }
+    }
+  ]
+}
