@@ -1,0 +1,60 @@
+name: conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  protocol:
+    name: protocol conformance + stage2 self-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install conformance deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r protocol/tests/conformance/requirements.txt
+          python -m pip install nats-py
+
+      - name: Protocol conformance (17 checks)
+        working-directory: protocol/tests/conformance
+        run: python run_conformance.py
+
+      - name: Stage 2 self-tests
+        working-directory: stage2
+        run: |
+          python test_projection.py
+          python test_a2a_server.py
+          python test_io.py
+          python test_bridge_joins.py
+          python test_unified.py
+          python test_protocol_specs.py
+          python test_a03_stream.py
+          python test_identity.py
+          python test_p1_batch.py
+          python test_a09_singleton.py
+          python test_b02_ao_refs.py
+
+      - name: Cross-repo vocabulary consistency
+        working-directory: stage2
+        run: python check-cross-repo-vocab.py
+
+  bench:
+    name: benchmark harness (dry run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run four-tier baseline benchmark (synthetic, no network)
+        working-directory: bench
+        run: |
+          python run_benchmark.py --self-check
