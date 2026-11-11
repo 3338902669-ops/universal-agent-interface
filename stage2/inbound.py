@@ -17,7 +17,8 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "1.0"          # 当前契约版本（v1）
+SUPPORTED_CONTRACT_VERSIONS = ("1.0", "0.2")   # 0.2 用于对接旧版实验室原型（版本协商，见 A-05）
 MAX_ENVELOPE_BYTES = 262144
 VALID_CLS = ("readonly", "reversible", "external")
 VALID_PRIORITY = ("high", "standard", "low")
@@ -95,6 +96,7 @@ def envelope_from_a2a(
     skill_ref: dict | None = None,
     approval: dict | None = None,
     task_id: str | None = None,
+    contract_version: str = CONTRACT_VERSION,
 ) -> dict:
     """A2A 请求 → 契约 v1 信封。不合法一律抛 InboundError，不静默降级。"""
     if not isinstance(request, dict):
@@ -129,8 +131,12 @@ def envelope_from_a2a(
     params = _params_of(parts)
     attachments = _attachments_of(parts)
 
+    if contract_version not in SUPPORTED_CONTRACT_VERSIONS:
+        raise InboundError("unsupported_contract_version: %r（支持 %s）"
+                           % (contract_version, SUPPORTED_CONTRACT_VERSIONS))
+
     envelope = {
-        "contract_version": CONTRACT_VERSION,
+        "contract_version": contract_version,
         "envelope_id": str(uuid.uuid4()),
         "task_id": task_id or str(uuid.uuid4()),
         "idempotency_key": derive_idempotency_key(subject, message_id, instruction, params),
