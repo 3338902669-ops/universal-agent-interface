@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:universal-agent-interface:fault-injection:v1",
+  "title": "Unified Fault Injection Case v1",
+  "description": "E-06：三仓此前各有一套故障注入（AO 的 gate 注入 10 个、GAR 的 attacks A01–A19、UAI 的十项验收），格式互不相通，无法横向比较。本 schema 把它们统一成一种可比较的用例。",
+  "type": "object",
+  "required": ["id", "kind", "expect", "reference"],
+  "properties": {
+    "id": { "type": "string", "minLength": 3, "pattern": "^[A-Z]{1,4}-[0-9]{2,4}$" },
+    "kind": {
+      "enum": ["loss", "duplicate", "stale_fence", "false_complete", "timeout", "crash_window",
+               "forged_evidence", "replay_approval", "double_hub", "tampered_ledger"]
+    },
+    "description": { "type": "string" },
+    "inject": { "type": "object", "description": "注入点与参数" },
+    "expect": {
+      "type": "object",
+      "required": ["outcome"],
+      "properties": {
+        "outcome": { "enum": ["reject", "detect", "recover", "block"] },
+        "reason_code": { "type": ["string", "null"] },
+        "must_not": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "description": "该用例对应哪个仓的哪条既有测试",
+      "required": ["repo"],
+      "properties": {
+        "repo": { "enum": ["agent-orchestra", "governed-agent-runtime", "universal-agent-interface"] },
+        "test": { "type": "string" },
+        "requirement": { "type": "string" }
+      }
+    },
+    "tier": { "enum": ["T0", "T1", "T2", "T3"], "description": "在四档基线中，T1 起才应被挡住" },
+    "evidence_level": { "enum": ["E1", "E2", "E3", "E4"] }
+  }
+}
