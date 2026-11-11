@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -92,6 +93,72 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _stream_events(self, task_id: str) -> None:
+        """SSE：跟随账本增量，把该任务的 A2A 事件推给外部（A-03 出站 / A-04 streaming）。"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        deadline = time.time() + float(os.environ.get("A2A_STREAM_SECONDS", "10"))
+        sent = set()
+        offset = 0
+        try:
+            while time.time() < deadline:
+                view = build_view(load_ledger(self.ledger_path))
+                slot = view.get(task_id)
+                if slot and slot.get("state") and "state" not in sent:
+                    payload = project_task_from_view(task_id, slot)
+                    body = json.dumps({"kind": "task", "task": payload}, ensure_ascii=False)
+                    self.wfile.write(("data: %s\n\n" % body).encode("utf-8"))
+                    self.wfile.flush()
+                    sent.add("state")
+
+                path = self.ledger_path
+                if path.exists():
+                    size = path.stat().st_size
+                    if size > offset:
+                        with path.open("r", encoding="utf-8", errors="replace") as fh:
+                            fh.seek(offset)
+                            chunk = fh.read()
+                            offset = fh.tell()
+                        for line in chunk.splitlines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                rec = json.loads(line)
+                            except Exception:
+                                continue
+                            if rec.get("record") != "TASK_EVENT" or rec.get("task_id") != task_id:
+                                continue
+                            key = ("evt", rec.get("seq"))
+                            if key in sent:
+                                continue
+                            sent.add(key)
+                            try:
+                                ev = P.project_event({
+                                    "task_id": task_id,
+                                    "seq": rec.get("seq"),
+                                    "kind": rec.get("kind"),
+                                    "occurred_at": rec.get("ts"),
+                                    "verdict": rec.get("verdict"),
+                                    "reason_code": rec.get("reason_code"),
+                                })
+                            except Exception:
+                                continue
+                            if ev is None:
+                                continue      # heartbeat 不投影
+                            ev["uai/seq"] = rec.get("seq")
+                            self.wfile.write(("data: %s\n\n" % json.dumps(ev, ensure_ascii=False)).encode("utf-8"))
+                            self.wfile.flush()
+                time.sleep(0.2)
+            self.wfile.write(b"event: end\ndata: {}\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
     def do_GET(self):  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
 
@@ -115,6 +182,10 @@ class Handler(BaseHTTPRequestHandler):
                     ]
                 },
             )
+
+        if path.startswith("/tasks/") and path.endswith("/events"):
+            tid = path[len("/tasks/"):-len("/events")]
+            return self._stream_events(tid)
 
         if path.startswith("/tasks/"):
             tid = path[len("/tasks/"):]
