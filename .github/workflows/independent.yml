@@ -1,0 +1,37 @@
+name: independent
+
+# Independent re-run job. Must not share a cache with conformance.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  independent:
+    name: independent stage2 re-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (no cache)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r protocol/tests/conformance/requirements.txt
+          python -m pip install nats-py
+
+      - name: Independent verification record
+        working-directory: stage2
+        run: python verify_independent.py
+
+      - name: Upload evidence record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-evidence
+          path: evidence/independent-*.json
+          if-no-files-found: warn
