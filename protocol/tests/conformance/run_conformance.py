@@ -89,6 +89,13 @@ def expect_output_rejected(record: dict[str, Any]) -> None:
     raise AssertionError("output boundary accepted a non-canonical verdict")
 
 
+def mutate(base: dict[str, Any], **overrides: Any) -> dict[str, Any]:
+    """深拷贝后覆盖指定顶层字段：反例只改一处，其余保持合法。"""
+    clone = copy.deepcopy(base)
+    clone.update(overrides)
+    return clone
+
+
 def run_case(name: str, call: Callable[[], None], results: list[tuple[str, bool, str]]) -> None:
     try:
         call()
@@ -258,6 +265,60 @@ def main() -> int:
     run_case(
         "output boundary rejects historical alias",
         lambda: expect_output_rejected(output_rejected),
+        results,
+    )
+
+    # ---------- §13 商务/驻留声明 + B-04 分级：可声明的必须收，非法的必须拒 ----------
+    declared = load_json(FIXTURE_DIR / "envelopes" / "with-sla-billing-residency.json")
+    run_case(
+        "section 13 blocks and attachment classification are accepted",
+        lambda: expect_schema_valid(declared, envelope_schema, "envelope with sla/billing/residency"),
+        results,
+    )
+    run_case(
+        "section 13 blocks stay optional (required list untouched)",
+        lambda: assert_true(
+            not ({"sla", "billing", "residency"} & set(envelope_schema["required"])),
+            "sla/billing/residency must not become required",
+        ),
+        results,
+    )
+    run_case(
+        "unknown billing basis is rejected",
+        lambda: expect_schema_invalid(
+            mutate(declared, billing={"basis": "per_hour"}),
+            envelope_schema,
+            "billing with unknown basis",
+        ),
+        results,
+    )
+    run_case(
+        "non-ISO residency region is rejected",
+        lambda: expect_schema_invalid(
+            mutate(declared, residency={"store_in": ["china"]}),
+            envelope_schema,
+            "residency with non-ISO region",
+        ),
+        results,
+    )
+    run_case(
+        "invalid attachment classification is rejected",
+        lambda: expect_schema_invalid(
+            mutate(
+                declared,
+                attachments=[
+                    {
+                        "uri": "file:///fixtures/sample.txt",
+                        "sha256": "1" * 64,
+                        "bytes": 32,
+                        "media_type": "text/plain",
+                        "classification": "bogus",
+                    }
+                ],
+            ),
+            envelope_schema,
+            "attachment with invalid classification",
+        ),
         results,
     )
 

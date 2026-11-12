@@ -23,7 +23,7 @@ jobs:
           python -m pip install -r protocol/tests/conformance/requirements.txt
           python -m pip install nats-py
 
-      - name: Protocol conformance (17 checks)
+      - name: Protocol conformance (22 checks)
         working-directory: protocol/tests/conformance
         run: python run_conformance.py
 

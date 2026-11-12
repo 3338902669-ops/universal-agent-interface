@@ -95,3 +95,41 @@ cd ../bench && python run_benchmark.py --self-check
 ```
 
 CI：`.github/workflows/conformance.yml` 跑 1)、2)、3)。
+
+## 5 受控对照实验包（E-02）
+
+`controlled_experiment/` 是「有无 skill 编排」这件事的完整可复现包，与本目录的四档基线
+（同一份代码在不同防护档位下的**模拟**对比）不是一回事：四档基线比的是防护组件，
+受控实验比的是同一个模型在有无编排环境下的**能力差异**。
+
+```bash
+cd controlled_experiment
+python manifest.py --out MANIFEST.json      # 冻结题目/判分器/运行器/解释器
+python test_controlled.py                   # 自检 26/26
+python run.py --seat X --arm with_skill --cmd "<模板>" --out raw/run-with
+python analyze.py --compare raw/run-with raw/run-without
+python manifest.py --verify MANIFEST.json   # 不一致即 rc=2，拒跑
+```
+
+**当前状态：两档真实数据未运行。** 2026-10-26 跑过一次同类对照，但 `raw/` 未留存、
+也没有随结果提交的 sha256，因此本包**不引用**那次结论。详见
+`controlled_experiment/README.md` §4。
+
+## 6 独立复跑门（E-04）
+
+`ci_suites.py` 把 19 个套件跑成一份**语义清单**（只留 PASS/FAIL 判据名 + 退出码，
+剔除 pid/耗时/临时路径），`compare_reruns.py` 判定两份清单是否逐套件等价。
+`.github/workflows/independent-verification.yml` 用两台独立 runner 各跑一次再比对。
+
+```bash
+python bench/ci_suites.py --out rerun-A.json
+python bench/ci_suites.py --out rerun-B.json
+python bench/compare_reruns.py rerun-A.json rerun-B.json   # divergent 即非 0
+python bench/test_rerun_compare.py                          # 比对器自检 7/7
+```
+
+边界（写在 workflow 里也写在这里）：同库同测在两台干净 runner 上复跑属于
+**体系内互检（E2）**，不等于外部第三方独立验证。缺 lab 或运行时的套件记为
+`skipped` 并写明原因（`requires_lab_nats_and_hub` / `requires_real_runtime_binary`），
+不伪装成 PASS，也不当成用例失败。
+

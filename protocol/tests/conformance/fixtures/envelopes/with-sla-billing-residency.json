@@ -1,0 +1,51 @@
+{
+  "contract_version": "1.0",
+  "envelope_id": "6f1c2a44-3f3d-4a2d-a1f2-9a6f4f2b6c10",
+  "task_id": "0b2f5d31-8a4e-4f7c-9c1e-2a7b6d5e4f30",
+  "context_id": "ctx-b03-b04",
+  "idempotency_key": "b03-b04-fixture-0001",
+  "target": {
+    "interface_id": "verification-seat"
+  },
+  "instruction": "Read the attached file and report its sha256. Declared SLA / billing / residency must be carried through unchanged.",
+  "skill_ref": null,
+  "resource_key": "res-fixture-b03",
+  "params": {
+    "note": "fixture exercises the optional section 13 blocks and B-04 classification"
+  },
+  "attachments": [
+    {
+      "uri": "file:///fixtures/sample.txt",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "bytes": 32,
+      "media_type": "text/plain",
+      "classification": "confidential"
+    }
+  ],
+  "timeout_s": 120,
+  "cls": "readonly",
+  "priority": "standard",
+  "approval": null,
+  "sla": {
+    "response_within_s": 30,
+    "deadline_at": "2026-11-13T00:00:00Z",
+    "max_attempts": 2
+  },
+  "billing": {
+    "basis": "per_task",
+    "unit_price": null,
+    "currency": "CNY",
+    "settle_to": "seat-verification",
+    "settlement_disputed": false
+  },
+  "residency": {
+    "store_in": [
+      "CN"
+    ],
+    "may_leave": false,
+    "retention_days": 0
+  },
+  "created_by": "fixture-author",
+  "created_at": "2026-11-12T06:00:00Z",
+  "trace_id": "9d8c7b6a-5f4e-4d3c-9b2a-1f0e9d8c7b6a"
+}
