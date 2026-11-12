@@ -51,6 +51,17 @@ def states_of(task_id: str) -> list[str]:
 async def main() -> int:
     req = {"message": {"messageId": "a02-msg-0001",
                        "parts": [{"text": "只读检查：请回一个 OK"}]}}
+    # 入站目前冻结。不要将主动拒绝误报为 Hub 端到端通过。
+    try:
+        await inbound_bridge.submit(nats_url=NATS_URL, request=req, created_by="a02-test",
+                                    target_interface="dsh", contract_version="0.2")
+    except inbound_bridge.InboundBridgeError as e:
+        if "inbound_disabled_pending_identity_and_idempotency_migration" in str(e):
+            print("SKIP A-02: 入站冻结，身份认证与旧键迁移未完成；未验证 Hub 端到端")
+            return 0
+        raise
+    raise AssertionError("expected fail-closed inbound gate")
+
     # 实验室原型实现的是契约 v0.2；用 v1 会被中枢以 unsupported_contract_version 拒绝
     try:
         await inbound_bridge.submit(nats_url=NATS_URL, request=req, created_by="a02-test",
@@ -95,6 +106,15 @@ async def main() -> int:
     )
     check("A-02 同 messageId 派生同一 idempotency_key",
           out2["envelope"]["idempotency_key"] == out["envelope"]["idempotency_key"], "")
+    check("A-02 重投返回原任务", out2["task_id"] == task_id and out2["hub_response"].get("duplicate") is True, str(out2["hub_response"]))
+    changed = {"message": {"messageId": "a02-msg-0001", "parts": [{"text": "内容改变"}]}}
+    try:
+        await inbound_bridge.submit(nats_url=NATS_URL, request=changed, created_by="a02-test",
+                                    target_interface="dsh", timeout_s=60, contract_version="0.2")
+    except inbound_bridge.InboundBridgeError as e:
+        check("A-02 同键异正文被拒", "idempotency_conflict" in str(e), str(e))
+    else:
+        check("A-02 同键异正文被拒", False, "hub accepted conflicting retry")
 
     print("\nRESULT: %d/%d passed" % (len(PASSES), len(PASSES) + len(FAILS)))
     return 0 if not FAILS else 1

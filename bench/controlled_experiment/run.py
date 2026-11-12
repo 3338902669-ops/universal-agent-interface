@@ -202,7 +202,11 @@ def write_json(path: Path, obj: Any) -> None:
 
 def run(args: argparse.Namespace) -> int:
     tasks_path = Path(args.tasks)
-    tasks = load_tasks(tasks_path)
+    # Parse, hash, and persist the same immutable byte snapshot.
+    task_bytes = tasks_path.read_bytes()
+    tasks = [json.loads(line) for line in task_bytes.decode("utf-8-sig").splitlines() if line.strip()]
+    if len(tasks) != 6 or any("scoring" not in task for task in tasks):
+        raise SystemExit("expected six tasks with scoring")
     backend = args.backend
     key = os.environ.get("UAI_EXPERIMENT_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
     url = args.url or os.environ.get("UAI_EXPERIMENT_URL") or ""
@@ -230,7 +234,7 @@ def run(args: argparse.Namespace) -> int:
         "model": model if backend == "http" else "stub-deterministic",
         "conditions": list(CONDITIONS),
         "tasks_path": str(tasks_path),
-        "tasks_sha256": sha256_file(tasks_path),
+        "tasks_sha256": hashlib.sha256(task_bytes).hexdigest(),
         "scoring_sha256": sha256_file(HERE / "scoring.py"),
         "skill_pack_sha256": sha256_text(json.dumps(SKILL_PACK, ensure_ascii=False, sort_keys=True)),
         "git_sha": git_sha(),
@@ -240,6 +244,8 @@ def run(args: argparse.Namespace) -> int:
         "api_key_present": bool(key) if backend == "http" else False,
         "url_present": bool(url) if backend == "http" else False,
     }
+    # Preserve the exact task bytes used; a later checkout may change line endings.
+    (out_dir / "tasks.frozen.jsonl").write_bytes(task_bytes)
     write_json(out_dir / "freeze.json", freeze)
 
     trials = []

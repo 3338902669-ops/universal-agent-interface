@@ -8,6 +8,7 @@ and do not invent numbers.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import sys
@@ -85,7 +86,47 @@ def summarize(raw: Path) -> dict[str, Any]:
     if not raw.is_dir():
         raise NotADirectoryError("raw path is not a directory: %s" % raw)
 
+    freeze_path = raw / "freeze.json"
+    if not freeze_path.is_file():
+        raise ValueError("missing freeze.json")
+    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+    tasks_path = raw / "tasks.frozen.jsonl"
+    if not tasks_path.is_file():
+        # Legacy runs contain no snapshot; use the shipped fixture only if its
+        # exact bytes (or LF-normalized checkout) match the recorded digest.
+        tasks_path = HERE / "fixtures" / "tasks.jsonl"
+    scoring_path = HERE / "scoring.py"
+    for key, path in (("tasks_sha256", tasks_path), ("scoring_sha256", scoring_path)):
+        data = path.read_bytes()
+        digests = {hashlib.sha256(data).hexdigest()}
+        if path.parent == HERE or path.parent == HERE / "fixtures":
+            digests.add(hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest())
+        if freeze.get(key) not in digests:
+            raise ValueError("frozen %s does not match artifact" % key)
+    tasks = [json.loads(line) for line in tasks_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    by_id = {task["id"]: task for task in tasks}
+    if len(by_id) != len(tasks) or not tasks:
+        raise ValueError("invalid task fixture")
     trials = load_trials(raw)
+    expected = {(condition, task_id) for condition in ("without_orchestration", "with_orchestration") for task_id in by_id}
+    seen = set()
+    for trial in trials:
+        key = (trial.get("condition"), trial.get("task_id"))
+        if key not in expected or key in seen:
+            raise ValueError("unknown or duplicate trial: %r" % (key,))
+        seen.add(key)
+        channel = trial.get("channel_failure")
+        if not isinstance(channel, bool):
+            raise ValueError("channel_failure must be boolean")
+        if channel:
+            if trial.get("score") is not None or not trial.get("error_code"):
+                raise ValueError("channel failure must have an error code and no score")
+        elif trial.get("error_code") is not None:
+            raise ValueError("scored trial cannot carry a channel error")
+        elif trial.get("score") != scoring.score(trial.get("output") or "", by_id[key[1]]):
+            raise ValueError("recorded score does not match frozen scorer")
+    if seen != expected:
+        raise ValueError("incomplete trials: missing %d" % len(expected - seen))
     overall = metrics_for(trials)
     by_condition = {}
     for cond in ("without_orchestration", "with_orchestration"):
@@ -105,11 +146,6 @@ def summarize(raw: Path) -> dict[str, Any]:
     with_r = by_condition["with_orchestration"]["exact_match_rate"]
     without_r = by_condition["without_orchestration"]["exact_match_rate"]
     delta = None if (with_r is None or without_r is None) else (with_r - without_r)
-
-    freeze = {}
-    freeze_path = raw / "freeze.json"
-    if freeze_path.is_file():
-        freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
 
     return {
         "raw": str(raw),

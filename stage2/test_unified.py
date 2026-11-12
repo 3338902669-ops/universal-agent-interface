@@ -113,8 +113,8 @@ def test_approval():
     check("28 action_digest 与 approval 字段无关",
           digest == U.action_digest({**env, "approval": {"x": 1}}), digest[:12])
     cred = {"envelope_sha256": digest, "approver_authenticity": "asserted", "used": False}
-    U.validate_approval(env, cred, cls="external")
-    check("29 摘要匹配的凭据通过", True, "")
+    expect(lambda: U.validate_approval(env, cred, cls="external"),
+           "29 未接可信验证器时匹配摘要仍拒绝", "trusted_approval_verifier_unavailable")
     expect(lambda: U.validate_approval(env, None, cls="external"),
            "30 external 无凭据被拒", "external_requires_approval")
     expect(lambda: U.validate_approval(env, {**cred, "envelope_sha256": "b" * 64}, cls="external"),

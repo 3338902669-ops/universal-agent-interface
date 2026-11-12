@@ -3,11 +3,9 @@
 契约依据：`protocol/contract-v1.md` §3（信封 11 必填 + 6 可选、target 二选一、≤262144 字节、
 `cls=external` 必带审批）。映射依据：`~/.shared/A2A-SPEC-MAPPING.md` v1.4 §3、§7.3。
 
-与映射表 §7.3 的一处修正：
-  原文说幂等键按 `subject + task_id + instruction + params` 派生。但**入站时 task_id 还不存在**
-  （由本契约侧生成），拿它当锚点会让每次重试都变成新键。改为以 A2A 的 `messageId` 为锚：
-      idempotency_key = sha256(subject + ":" + message_id + ":" + canonical(instruction) + ":" + canonical(params))
-  同一 messageId 重投 → 同一键；改了正文或参数 → 不同键。
+幂等键仅由可信调用方提供的主体和 A2A messageId 派生；其他语义字段交由中枢
+比较并拒绝冲突。调用方必须保证 created_by 是经过认证的主体，不能来自请求正文。
+此处不具备审批验证能力，external 请求保守拒绝。
 """
 
 from __future__ import annotations
@@ -32,8 +30,13 @@ def _canonical(value) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def derive_idempotency_key(subject: str, message_id: str, instruction: str, params) -> str:
-    raw = ":".join([subject, message_id, instruction, _canonical(params)])
+def derive_idempotency_key(subject: str, message_id: str, instruction=None, params=None) -> str:
+    """Stable key for an authenticated subject and message; legacy arguments are ignored."""
+    if not isinstance(subject, str) or not subject.strip():
+        raise InboundError("invalid_subject")
+    if not isinstance(message_id, str) or not message_id.strip():
+        raise InboundError("invalid_message_id")
+    raw = _canonical([subject, message_id])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -111,7 +114,8 @@ def envelope_from_a2a(
     if not message_id:
         raise InboundError("missing_message_id")
 
-    subject = request.get("subject") or created_by
+    # created_by must be supplied by the trusted integration, never request["subject"].
+    subject = created_by
 
     # target 二选一，且必须恰好一个
     if bool(target_interface) == bool(target_capability):
@@ -119,8 +123,9 @@ def envelope_from_a2a(
 
     if cls not in VALID_CLS:
         raise InboundError("invalid_cls: %r" % (cls,))
-    if cls == "external" and not approval:
-        raise InboundError("external_requires_approval")
+    if cls == "external":
+        # A nonempty object is not proof of a valid, scoped approval.
+        raise InboundError("external_approval_verification_unavailable")
     if priority not in VALID_PRIORITY:
         raise InboundError("invalid_priority: %r" % (priority,))
 

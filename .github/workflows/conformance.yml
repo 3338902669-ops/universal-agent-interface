@@ -48,6 +48,9 @@ jobs:
           python test_a09_singleton.py
           python test_b02_ao_refs.py
           python test_p2_batch.py
+          python -m unittest -v test_inbound_semantics test_inbound_gate
+      - name: Verify hub idempotency conflicts
+        run: python -m unittest -v stage2.test_hub_idempotency
 
       - name: Cross-repo vocabulary consistency
         working-directory: stage2
@@ -65,3 +68,6 @@ jobs:
         working-directory: bench
         run: |
           python run_benchmark.py --self-check
+      - name: Verify controlled experiment integrity
+        working-directory: bench/controlled_experiment
+        run: python -m unittest -v test_integrity

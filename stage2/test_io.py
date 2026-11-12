@@ -67,8 +67,8 @@ def test_inbound():
     changed = json.loads(json.dumps(BASE_MSG))
     changed["message"]["parts"][0]["text"] = "换一个任务"
     env3 = inbound.envelope_from_a2a(changed, created_by="user-1", target_interface="dsh")
-    check("7 改正文 → 不同 idempotency_key",
-          env["idempotency_key"] != env3["idempotency_key"], env3["idempotency_key"][:16])
+    check("7 同 messageId 改正文保留键，由中枢拒绝语义冲突",
+          env["idempotency_key"] == env3["idempotency_key"], env3["idempotency_key"][:16])
     check("8 task_id 每次都新（新提交新信封）", env["task_id"] != env2["task_id"], "")
 
     # target 二选一
@@ -81,9 +81,9 @@ def test_inbound():
     expect_error(lambda: inbound.envelope_from_a2a(BASE_MSG, created_by="u",
                                                   target_interface="dsh", cls="external"),
                  "11 cls=external 无审批被拒", "approval")
-    ok = inbound.envelope_from_a2a(BASE_MSG, created_by="u", target_interface="dsh",
-                                   cls="external", approval={"credential_id": "c1"})
-    check("12 cls=external 带审批可过", ok["cls"] == "external", "")
+    expect_error(lambda: inbound.envelope_from_a2a(BASE_MSG, created_by="u", target_interface="dsh",
+                                                  cls="external", approval={"credential_id": "c1"}),
+                 "12 未接可信审批时即使有凭据也拒绝", "approval")
 
     # 附件指纹
     bad_part = {"message": {"messageId": "m2", "parts": [

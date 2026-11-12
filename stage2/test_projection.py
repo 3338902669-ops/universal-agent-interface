@@ -136,7 +136,7 @@ def t6():
     b = inbound.derive_idempotency_key("user-1", "msg-1", "do it", {"k": 1})
     c = inbound.derive_idempotency_key("user-1", "msg-1", "do it", {"k": 2})
     assert a == b, "同输入必须同值"
-    assert a != c, "不同语义必须不同值"
+    assert a == c, "相同消息标识应保持键，由中枢检查语义冲突"
     assert len(a) == 64, "sha256 hex 应为 64 位"
 
     env = inbound.envelope_from_a2a(

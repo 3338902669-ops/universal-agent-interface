@@ -52,36 +52,8 @@ async def submit(
     contract_version: str = "1.0",
     connect_timeout_s: float = 10.0,
 ) -> dict:
-    """投递一个 A2A 请求，返回 {envelope, hub_response, task_id, accepted}。"""
-    envelope = inbound.envelope_from_a2a(
-        request,
-        created_by=created_by,
-        target_interface=target_interface,
-        target_capability=target_capability,
-        timeout_s=timeout_s,
-        cls=cls,
-        approval=approval,
-        contract_version=contract_version,
-    )
-
-    nc = await _connect(nats_url)
-    try:
-        payload = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
-        msg = await nc.request(SUBMIT_SUBJECT, payload, timeout=connect_timeout_s)
-        hub_response = json.loads(msg.data.decode("utf-8"))
-    finally:
-        await nc.close()
-
-    accepted = bool(hub_response.get("ok", False))
-    task_id = hub_response.get("task_id") or envelope["task_id"]
-    if not accepted:
-        raise InboundBridgeError("hub_rejected: %s" % hub_response.get("reason"))
-    return {
-        "envelope": envelope,
-        "hub_response": hub_response,
-        "task_id": task_id,
-        "accepted": accepted,
-    }
+    """入站投递暂不可用：旧键迁移和身份认证尚未完成。"""
+    raise InboundBridgeError("inbound_disabled_pending_identity_and_idempotency_migration")
 
 
 async def query_state(*, nats_url: str, task_id: str, timeout_s: float = 5.0) -> dict:
@@ -98,7 +70,8 @@ def _cli() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--nats-url", default=os.environ.get("NATS_URL", "nats://127.0.0.1:43321"))
     ap.add_argument("--text", required=True)
-    ap.add_argument("--message-id", default="msg-00000001")
+    ap.add_argument("--message-id", required=True,
+                    help="调用方提供稳定消息 ID；重试时须使用相同 ID")
     ap.add_argument("--target", default="dsh")
     ap.add_argument("--created-by", default="a2a-client")
     ap.add_argument("--cls", default="readonly")

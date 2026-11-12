@@ -696,6 +696,20 @@ class Hub:
         existing_id = self.idempotency.get(envelope["idempotency_key"])
         if existing_id:
             task = self.tasks[existing_id]
+            generated_fields = {"task_id", "envelope_id", "trace_id", "created_at"}
+            semantic_envelope = lambda value: canonical_json(
+                {key: item for key, item in value.items() if key not in generated_fields}
+            )
+            if semantic_envelope(envelope) != semantic_envelope(task.envelope):
+                self.record(
+                    "ENVELOPE_REJECTED",
+                    task_id=envelope["task_id"],
+                    reason="idempotency_conflict",
+                )
+                self.json_response(
+                    msg, {"ok": False, "accepted": False, "reason": "idempotency_conflict"}
+                )
+                return
             self.json_response(
                 msg,
                 {

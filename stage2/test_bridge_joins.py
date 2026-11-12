@@ -154,8 +154,8 @@ def main() -> int:
     check("入站：生产函数派生值 == 信封里的键", e1["idempotency_key"] == direct,
           direct[:16])
     check("入站：同输入两次同键", e1["idempotency_key"] == e2["idempotency_key"], "")
-    check("入站：结构破坏后键会变",
-          inbound.derive_idempotency_key("u", "m-1", "ping!", None) != direct, "")
+    check("入站：同消息标识保留键以供中枢发现冲突",
+          inbound.derive_idempotency_key("u", "m-1", "ping!", None) == direct, "")
 
     # ---------- N1：completed 已带裁定时不得再补发一条相同终态 ----------
     tmp = Path(tempfile.mkdtemp(prefix="uai-n1-"))

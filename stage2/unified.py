@@ -229,6 +229,6 @@ def validate_approval(envelope: dict, credential: dict | None, *, cls: str) -> N
                          % (credential.get("envelope_sha256"), want))
     if credential.get("used"):
         raise ModelError("approval_already_used")
-    auth = credential.get("approver_authenticity", "asserted")
-    if auth not in ("asserted", "authenticated"):
-        raise ModelError("bad_approver_authenticity: %r" % (auth,))
+    # Digest equality and a caller-supplied identity claim are not authorization.
+    # No trusted verifier or atomic single-use store is wired here yet.
+    raise ModelError("trusted_approval_verifier_unavailable")
