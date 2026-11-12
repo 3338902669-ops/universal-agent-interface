@@ -1,0 +1,31 @@
+{
+  "schema": "uai.bench.controlled_experiment.manifest/1",
+  "files": {
+    "fixtures/tasks.jsonl": {
+      "sha256": "0f40756d26345439617db0a7939890976ba644a4f59609a6e1e218a978b8778f",
+      "bytes": 998
+    },
+    "run.py": {
+      "sha256": "001b9cc511abbae72ad3534de0191fe8abeea7300bd1af9f2ae68dfaa9e7b41e",
+      "bytes": 5047
+    },
+    "analyze.py": {
+      "sha256": "b62a2b6ca2814e8d88636f29987585d04aaf64d5ba6654a5ecb53fb60145d1fa",
+      "bytes": 4484
+    },
+    "test_controlled.py": {
+      "sha256": "faea3b55716c07817c359249b8bf07a3b4c312685e51b5b3ad1ba413e6cadc69",
+      "bytes": 6352
+    }
+  },
+  "tasks": 6,
+  "python": {
+    "implementation": "CPython",
+    "version": "3.12.10"
+  },
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64"
+  }
+}

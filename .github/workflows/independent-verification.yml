@@ -1,0 +1,90 @@
+name: independent-verification
+
+# E-04：把「独立复跑」做成 CI 的硬门，而不是人工口头复核。
+# 两个 job 在各自独立的 runner 上跑同一份清单，第三个 job 逐套件比对语义信号。
+# 两份清单不等价（退出码不同 / PASS-FAIL 名称不同）即判红。
+#
+# 边界（写在文件里而不是只写在文档里）：这是**同一代码库、同一套测试**在两个干净 runner 上的复跑，
+# 属于体系内互检（E2），不等于外部第三方独立验证。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rerun-a:
+    name: rerun A (primary runner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r protocol/tests/conformance/requirements.txt
+          python -m pip install nats-py
+      - name: Run all suites
+        run: python bench/ci_suites.py --out rerun-A.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rerun-A
+          path: rerun-A.json
+
+  rerun-b:
+    name: rerun B (independent runner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r protocol/tests/conformance/requirements.txt
+          python -m pip install nats-py
+      - name: Run all suites
+        run: python bench/ci_suites.py --out rerun-B.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rerun-B
+          path: rerun-B.json
+
+  compare:
+    name: compare rerun A vs B
+    needs: [rerun-a, rerun-b]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: rerun-A
+      - uses: actions/download-artifact@v4
+        with:
+          name: rerun-B
+      - name: Require both reruns to be green upstream
+        run: |
+          python - <<'PY'
+          import json, sys
+          for p in ("rerun-A.json", "rerun-B.json"):
+              d = json.load(open(p, encoding="utf-8"))
+              if d.get("failed"):
+                  print(p, "had failing suites:", d["failed"]); sys.exit(1)
+          print("both reruns internally green")
+          PY
+      - name: Compare semantic signals
+        run: python bench/compare_reruns.py rerun-A.json rerun-B.json --out rerun-compare.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rerun-compare
+          path: rerun-compare.json

@@ -40,7 +40,7 @@ from core import (
 
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED"}
 ACTIVE_EXECUTION_STATES = {"DISPATCHED", "CLAIMED", "RUNNING"}
-VERDICT_WORDS = {"通过", "带注通过", "条件通过", "未核", "驳回", "作废"}
+VERDICT_WORDS = {"通过", "带注通过", "条件通过", "不通过", "未核", "作废"}
 
 
 def iso_after(seconds: float) -> str:

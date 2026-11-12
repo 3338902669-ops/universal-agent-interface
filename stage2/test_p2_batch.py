@@ -76,14 +76,62 @@ def main() -> int:
     check("S8 未链化的历史记录不算失败（可渐进启用）",
           v["ok"] is True and v["unsealed"] == 2, json.dumps(v)[:80])
 
-    # ---------- B-04 附件分级 ----------
-    env = json.load(io.open(os.path.join(PROTO, "schemas", "envelope.schema.json"),
-                            encoding="utf-8-sig"))
-    att = env["properties"].get("attachments")
-    check("B-04 envelope 有 attachments 定义", att is not None, "")
-    item = (att or {}).get("items", {})
-    check("B-04 attachments 项允许 classification 字段",
-          "classification" in (item.get("properties") or {}), str(list((item.get("properties") or {}))))
+    # ---------- B-04 附件分级（按行为校验，不按 schema 形状断言） ----------
+    # 旧断言只检查 items.properties 里有没有 classification，这恰恰放过了真实缺陷：
+    # classification 写在 $ref 兄弟位，而 $defs.artifactPointer 是 additionalProperties:false，
+    # 于是「带分级的附件」被校验器整体拒收 —— 字段存在但从未可用。
+    env_path = os.path.join(PROTO, "schemas", "envelope.schema.json")
+    env = json.load(io.open(env_path, encoding="utf-8-sig"))
+    try:
+        import jsonschema
+        from jsonschema import Draft202012Validator
+        Draft202012Validator.check_schema(env)
+        have_js = True
+    except Exception as e:                                     # noqa: BLE001
+        have_js = False
+        check("B-04 jsonschema 可用", False, str(e)[:80])
+
+    if have_js:
+        base = json.load(io.open(os.path.join(PROTO, "tests", "conformance", "fixtures",
+                                              "envelopes", "readonly.json"),
+                                 encoding="utf-8-sig"))
+
+        def accepts(mut: dict) -> bool:
+            e = json.loads(json.dumps(base))
+            mut(e)
+            return Draft202012Validator(env).is_valid(e)
+
+        ptr = {"uri": "file:///tmp/a.txt", "sha256": "a" * 64, "bytes": 3, "media_type": "text/plain"}
+        check("B-04 带 classification 的附件可被接受",
+              accepts(lambda e: e.update(attachments=[dict(ptr, classification="confidential")])), "")
+        check("B-04 非法 classification 被拒",
+              not accepts(lambda e: e.update(attachments=[dict(ptr, classification="bogus")])), "")
+        check("B-04 缺 classification 仍合法（可选字段）",
+              accepts(lambda e: e.update(attachments=[dict(ptr)])), "")
+        check("B-04 附件仍不许未知字段",
+              not accepts(lambda e: e.update(attachments=[dict(ptr, secret="x")])), "")
+
+        # ---------- B-03 SLA / 结算 / 驻留 ----------
+        check("B-03 sla 可声明", accepts(lambda e: e.update(sla={"response_within_s": 60, "max_attempts": 3,
+                                                               "deadline_at": "2026-11-13T00:00:00Z"})), "")
+        check("B-03 sla.max_attempts 不得为 0",
+              not accepts(lambda e: e.update(sla={"max_attempts": 0})), "")
+        check("B-03 billing 允许 unit_price=null（未定价≠0）",
+              accepts(lambda e: e.update(billing={"basis": "per_task", "unit_price": None, "currency": "CNY"})), "")
+        check("B-03 billing 未知 basis 被拒",
+              not accepts(lambda e: e.update(billing={"basis": "per_hour"})), "")
+        check("B-03 billing currency 必为大写三字母",
+              not accepts(lambda e: e.update(billing={"basis": "per_task", "currency": "cny"}))
+              and accepts(lambda e: e.update(billing={"basis": "per_task", "currency": "CNY"})), "")
+        check("B-03 residency 可声明",
+              accepts(lambda e: e.update(residency={"store_in": ["CN"], "may_leave": False,
+                                                    "retention_days": 0})), "")
+        check("B-03 residency 区域非 ISO 被拒",
+              not accepts(lambda e: e.update(residency={"store_in": ["china"]})), "")
+        check("B-03 residency may_leave 默认 false（schema default）",
+              env["$defs"]["residency"]["properties"]["may_leave"].get("default") is False, "")
+        check("B-03 三个扩展块都声明为可选（不在 required）",
+              all(k not in env["required"] for k in ("sla", "billing", "residency")), str(env["required"][:3]) + "...")
 
     # ---------- E-06 故障注入格式 ----------
     fx = os.path.join(PROTO, "unified", "fault-injection.schema.json")

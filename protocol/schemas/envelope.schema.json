@@ -120,18 +120,7 @@
     "attachments": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/artifactPointer",
-        "properties": {
-          "classification": {
-            "enum": [
-              "public",
-              "internal",
-              "confidential",
-              "restricted"
-            ],
-            "description": "数据分级（B-04）"
-          }
-        }
+        "$ref": "#/$defs/artifactPointer"
       }
     },
     "timeout_s": {
@@ -174,6 +163,15 @@
     },
     "trace_id": {
       "$ref": "#/$defs/uuid"
+    },
+    "sla": {
+      "$ref": "#/$defs/sla"
+    },
+    "billing": {
+      "$ref": "#/$defs/billing"
+    },
+    "residency": {
+      "$ref": "#/$defs/residency"
     }
   },
   "allOf": [
@@ -243,6 +241,95 @@
           "minLength": 1,
           "maxLength": 255,
           "pattern": "^[^/]+/[^/]+$"
+        },
+        "classification": {
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "description": "数据分级（B-04）。v1.2 修正：此前写在 items 的 $ref 兄弟位，被 artifactPointer 的 additionalProperties:false 拒收，等于该字段从未可用。"
+        }
+      }
+    },
+    "sla": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "对外承诺（§13.1）。只描述承诺，不描述惩罚与判定。",
+      "properties": {
+        "response_within_s": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deadline_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "计费声明（§13.2）。unit_price=null 表示未定价，不得推断为 0。",
+      "required": [
+        "basis"
+      ],
+      "properties": {
+        "basis": {
+          "enum": [
+            "per_task",
+            "per_token",
+            "per_minute"
+          ]
+        },
+        "unit_price": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "settle_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "settlement_disputed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "residency": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "数据驻留声明（§13.3）。may_leave 缺省按 false 处理。",
+      "properties": {
+        "store_in": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "minItems": 1
+        },
+        "may_leave": {
+          "type": "boolean",
+          "default": false
+        },
+        "retention_days": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

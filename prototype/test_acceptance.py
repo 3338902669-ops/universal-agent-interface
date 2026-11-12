@@ -932,7 +932,7 @@ Get-CimInstance Win32_Process | Where-Object {{
         client = await self.client()
         interface_id, handle = self.start_interface("verdict")
         await self.wait_registration(interface_id)
-        words = ["通过", "带注通过", "条件通过", "未核", "驳回", "作废"]
+        words = ["通过", "带注通过", "条件通过", "不通过", "未核", "作废"]
         accepted: list[str] = []
         task_ids: list[str] = []
         for index, word in enumerate(words):

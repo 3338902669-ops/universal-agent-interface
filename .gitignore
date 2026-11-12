@@ -1,44 +1,24 @@
-# Local credentials and lab state
-.lab-tokens/
-data/
-logs/
-evidence/
-runtime/
-fixtures/
-
-# Python
+# 本地运行产物与备份，不入库
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.venv/
-venv/
-
-# Secrets and environment files
-.env
-.env.*
-!.env.example
-*.token
-*.key
-*.pem
-*.p12
-*.pfx
-id_rsa*
-id_ed25519*
-
-# Logs, temporary files, and editor state
+*.pyc
+*.orig-v0.2
 *.log
-*.tmp
-*.temp
-Thumbs.db
-.DS_Store
-.idea/
-.vscode/
 
-# Packaging and coverage output
-build/
-dist/
-*.egg-info/
-.coverage
-htmlcov/
+# 实验/验收运行现场（每次跑都会重生，含临时 token 与账本）
+prototype/.lab-tokens/
+prototype/data/
+prototype/evidence/
+prototype/logs/
+prototype/runtime/
+adapters/verification-seat/.lab-tokens/
+adapters/verification-seat/data/
+adapters/verification-seat/evidence/
+adapters/verification-seat/fixtures/
+adapters/verification-seat/logs/
+adapters/verification-seat/runtime/
+
+# 复跑产物
+rerun-*.json
+
+# 与远端同步用的本地副本目录
+stage2-remote/
