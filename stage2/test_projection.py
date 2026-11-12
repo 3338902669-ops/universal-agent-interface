@@ -192,12 +192,18 @@ def t8():
 @case("9 STATE_TO_A2A 的像集全部存在于官方 a2a.proto 的 TaskState 枚举")
 def t9():
     import os
-    proto = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "a2a-official-spec", "a2a.proto",
-    )
-    if not os.path.exists(proto):
-        raise AssertionError("缺少官方 proto，无法做独立比对：%s" % proto)
+    # 官方 proto 的查找顺序：显式环境变量 → 仓库内副本 → 仓库上一级的兄弟目录（旧布局）。
+    # 旧版只找兄弟目录，导致本机能过、干净 runner 上必然红。
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(here)
+    candidates = [
+        os.environ.get("UAI_A2A_PROTO"),
+        os.path.join(repo_root, "a2a-official-spec", "a2a.proto"),
+        os.path.join(os.path.dirname(repo_root), "a2a-official-spec", "a2a.proto"),
+    ]
+    proto = next((p for p in candidates if p and os.path.exists(p)), None)
+    if proto is None:
+        raise AssertionError("缺少官方 proto，无法做独立比对，已尝试：%s" % candidates)
     text = io.open(proto, encoding="utf-8").read()
     m = re.search(r"enum\s+TaskState\s*\{(.*?)\}", text, re.S)
     assert m, "proto 里找不到 enum TaskState"

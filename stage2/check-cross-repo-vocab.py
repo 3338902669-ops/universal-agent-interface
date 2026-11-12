@@ -30,7 +30,16 @@ SIBLING = {
     "gar_findings": os.path.join(HOME, "workspace", "projects", "joint-audit",
                                  "governed-agent-runtime", "KNOWN-FINDINGS.md"),
 }
-A2A_PROTO = os.path.join(HOME, "workspace", "projects", "a2a-official-spec", "a2a.proto")
+A2A_PROTO = next(
+    (p for p in (
+        os.environ.get("UAI_A2A_PROTO"),
+        # 仓库内副本：让 CI 也能做 A2A 词表比对，而不是一路 SKIP
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "a2a-official-spec", "a2a.proto"),
+        os.path.join(HOME, "workspace", "projects", "a2a-official-spec", "a2a.proto"),
+    ) if p and os.path.exists(p)),
+    os.path.join(HOME, "workspace", "projects", "a2a-official-spec", "a2a.proto"),
+)
 
 STRICT = "--strict" in sys.argv
 FAILS, SKIPS = [], []
