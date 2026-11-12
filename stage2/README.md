@@ -1,4 +1,4 @@
-﻿# Stage 2：A2A 边界投影层
+# Stage 2：A2A 边界投影层
 
 在**不改动** `prototype/` 与 `adapters/` 的前提下，把内部账本投影成 A2A 对象、把 A2A 请求转成契约信封。
 
@@ -22,7 +22,8 @@
 | `inbound_bridge.py` | A2A 请求 → 信封 → `hub.submit` 闭环 | `test_a02_inbound.py` **8/8**（需真 lab） |
 | `check-cross-repo-vocab.py` | 跨仓词表一致性（读三仓真实文件） | **17 项 0 漂移** |
 
-合计 **259 条用例**（本地全绿，`test_a02_inbound.py` 需 nats+hub lab，CI 记显式 skip）。
+合计 **259 条用例**（本地全绿）。`test_a02_inbound.py` 需要真 nats+hub lab；CI 里由
+`../bench/lab.py` 先把 lab 拉起来**真跑**（workflow 里有硬门：该套件若被 skip 即判红）。
 协议侧另有 `../protocol/tests/conformance/` **22 项**；`../protocol/GAR-OPEN-ITEMS-REF.md` 记录了
 C-06~C-10 这些**必须由 GAR 侧闭合**的项及验收口径。
 
