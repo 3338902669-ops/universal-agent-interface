@@ -90,16 +90,16 @@ def main() -> int:
     b.write(flushed)
     lines = outbox_lines(tmp / "data" / "o.jsonl")
     finals_after = [e for e in lines if e.get("final") and e.get("task_id") == "f1a"]
-    texts_after = [(e.get("status") or {}).get("message", {}).get("parts", [{}])[0].get("text")
-                   for e in lines if e.get("task_id") == "f1a" and e.get("status")]
-    # 权威口径：completed 携带裁定发 1 条 final（text=通过）；
-    # VERDICT 同值 update 被 _verdict_emitted 拦下不算缺陷（durability 语义）。
+    final_texts = [(e.get("status") or {}).get("message", {}).get("parts", [{}])[0].get("text")
+                   for e in finals_after if e.get("status")]
+    # 权威语义（同 P2）：completed 携带最后裁定「通过」发唯一 final——
+    # 不再是被指针吞掉的「待核验」，也无多余 final。
     ok = (not finals_default and len(finals_after) == 1
-          and texts_after == ["通过"])
+          and final_texts == ["通过"])
     all_ok &= report("PASS" if ok else "CONFIRMED",
                      "F1b 逃生口发布整条挂起链（终态带裁定，非待核验）",
-                     "default_finals=%d after=%d verdict_texts=%s"
-                     % (len(finals_default), len(finals_after), texts_after))
+                     "default_finals=%d after=%d final_texts=%s"
+                     % (len(finals_default), len(finals_after), final_texts))
     b.close()
 
     # ---------- F2：重复 seq 且缺 TASK_STATE 兜底 → 吞终态？ ----------
@@ -167,6 +167,69 @@ def main() -> int:
                      % (len(verdict_updates),
                         verdict_updates[0].get("final") if verdict_updates else None,
                         texts))
+    b.close()
+
+    # ---------- P1（agent-15 第二轮反例 1）：flush 不得丢非终态 TASK_EVENT ----------
+    # 交错两任务：a/b 各 result_ready → a/b progress → a failed / b cancelled。
+    # force 必须产出 progress（否则前序状态丢失）且终态齐全。
+    tmp = Path(tempfile.mkdtemp(prefix="p1-"))
+    led = make(tmp)
+    append(led,
+           {"record": "TASK_EVENT", "task_id": "a", "seq": 1, "kind": "result_ready"},
+           {"record": "TASK_EVENT", "task_id": "b", "seq": 1, "kind": "result_ready"},
+           {"record": "TASK_EVENT", "task_id": "a", "seq": 2, "kind": "progress"},
+           {"record": "TASK_EVENT", "task_id": "b", "seq": 2, "kind": "progress"},
+           {"record": "TASK_EVENT", "task_id": "a", "seq": 3, "kind": "failed"},
+           {"record": "TASK_EVENT", "task_id": "b", "seq": 3, "kind": "cancelled"})
+    b = EventBridge(tmp, tmp / "data" / "o.jsonl", experimental_test_only=True)
+    evs = flush(b)
+    flushed = b.force_pending_flush()
+    b.write(flushed)
+    lines = outbox_lines(tmp / "data" / "o.jsonl")
+    progress_lines = [e for e in lines if e.get("uai/kind") == "progress"]
+    finals_ab = [e for e in lines if e.get("final")]
+    # progress 的对外形状由 projection 决定（status_update WORKING）；
+    # 关键是 progress 事件不得凭空消失。
+    progress_states = [(e.get("status") or {}).get("state") for e in lines
+                       if e.get("status") and e.get("uai/seq") == 2]
+    ok = (len(progress_lines) == 2 or len(progress_states) == 2) and len(finals_ab) == 2
+    all_ok &= report("PASS" if ok else "CONFIRMED",
+                     "P1 flush 保留 progress（不丢非终态事件）",
+                     "progress=%d/%d finals=%d"
+                     % (len(progress_lines), len(progress_states), len(finals_ab)))
+    b.close()
+
+    # ---------- P2（agent-15 第二轮反例 2）：flush 不得预取/颠倒裁定时序 ----------
+    # result_ready → VERDICT 通过 → VERDICT 不通过 → SUCCEEDED → completed。
+    # 权威语义（durability）：completed 携带**最后**裁定发 final；
+    # 之前的裁定 update 按账本顺序，不得出现在终态之后、也不得三 final。
+    tmp = Path(tempfile.mkdtemp(prefix="p2-"))
+    led = make(tmp)
+    append(led,
+           {"record": "TASK_EVENT", "task_id": "c", "seq": 1, "kind": "result_ready"},
+           {"record": "VERDICT", "task_id": "c", "verdict": "通过"},
+           {"record": "VERDICT", "task_id": "c", "verdict": "不通过"},
+           {"record": "TASK_STATE", "task_id": "c", "state": "SUCCEEDED"},
+           {"record": "TASK_EVENT", "task_id": "c", "seq": 2, "kind": "completed"})
+    b = EventBridge(tmp, tmp / "data" / "o.jsonl", experimental_test_only=True)
+    evs = flush(b)
+    flushed = b.force_pending_flush()
+    b.write(flushed)
+    lines = outbox_lines(tmp / "data" / "o.jsonl")
+    finals_c = [e for e in lines if e.get("final")]
+    v_updates = [e for e in lines if e.get("uai/source") == "VERDICT"]
+    v_texts = [e["status"]["message"]["parts"][0]["text"] for e in v_updates]
+    # 权威语义（durability test_pending_state_then_completed_prefers_real_event_after_restart）：
+    # flush 里两条裁定按账本顺序各发一条 update（final=False，非兜底路径不带 final），
+    # completed 携带**最后**裁定「不通过」发唯一 final。无颠倒是序、无重复 final。
+    final_texts = [e["status"]["message"]["parts"][0]["text"] for e in finals_c
+                   if e.get("status")]
+    ok = (v_texts == ["通过", "不通过"]
+          and all(e.get("final") is False for e in v_updates)
+          and final_texts == ["不通过"])
+    all_ok &= report("PASS" if ok else "CONFIRMED",
+                     "P2 flush 裁定按账本顺序发布（通过 → 不通过）",
+                     "finals=%d v_updates=%s" % (len(finals_c), v_texts))
     b.close()
 
     print("\nSUMMARY: PASS=%d CONFIRMED=%d NOTE=%d"
