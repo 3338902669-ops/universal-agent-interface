@@ -7,7 +7,7 @@ GAR 有 `Ledger.verifyChain`，UAI 没有，这是威胁模型里登记的真实
 
   1. 每条记录追加时带 `prev_hash` 与 `self_hash`：
          self_hash = sha256( canonical(record 去掉 self_hash) + prev_hash )
-  2. `verify_chain` 从头重算；任何一处被改、被删、被插，都会在第一个断点报出来。
+  2. `verify_chain` 从头重算链化记录，可检测部分修改和中间断链；删除尾部、整段删除或重算整链需要外部可信锚点才能发现。
   3. **不改动既有账本格式**：老记录没有 `self_hash` 时视为"未链化"，单独统计，
      不当作失败（否则历史库全部判红，没人会启用）。
 
@@ -64,14 +64,18 @@ def verify_chain(path: str | os.PathLike) -> dict:
     prev = GENESIS
     total = sealed = 0
     broken = []
+    started = False
     for lineno, rec in iter_records(path):
         total += 1
         if rec is None:
             broken.append((lineno, "unparseable"))
             continue
         if "self_hash" not in rec:
-            # 未链化的历史记录：可以接受，但不推进 prev（下一段从 GENESIS 重新起链）
+            # A legacy prefix may be unsealed, but not records after chaining starts.
+            if started:
+                broken.append((lineno, "unsealed_after_chain_start"))
             continue
+        started = True
         sealed += 1
         expect_prev = rec.get("prev_hash")
         if expect_prev != prev:
@@ -87,6 +91,9 @@ def verify_chain(path: str | os.PathLike) -> dict:
 def append_sealed(path: str | os.PathLike, record: dict) -> dict:
     """追加一条已封链的记录，返回写入的记录。"""
     p = Path(path)
+    check = verify_chain(p)
+    if not check["ok"]:
+        raise ValueError("cannot append to invalid chain")
     prev = GENESIS
     last = None
     for _, rec in iter_records(p):

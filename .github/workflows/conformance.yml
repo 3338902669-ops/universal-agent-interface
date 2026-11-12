@@ -48,7 +48,7 @@ jobs:
           python test_a09_singleton.py
           python test_b02_ao_refs.py
           python test_p2_batch.py
-          python -m unittest -v test_inbound_semantics test_inbound_gate test_event_bridge_gate
+          python -m unittest -v test_inbound_semantics test_inbound_gate test_event_bridge_gate test_ledger_integrity
       - name: Verify hub idempotency conflicts
         run: python -m unittest -v stage2.test_hub_idempotency
 
