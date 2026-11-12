@@ -47,6 +47,7 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("stage2", ["test_p2_batch.py"], "stage2-test_p2_batch"),
     ("stage2", ["test_a02_inbound.py"], "stage2-test_a02_inbound"),
     ("stage2", ["test_a05_second_runtime.py"], "stage2-test_a05_second_runtime"),
+    ("stage2", ["test_a05_claude_runtime.py"], "stage2-test_a05_claude_runtime"),
     ("stage2", ["check-cross-repo-vocab.py"], "cross-repo-vocab"),
     ("bench", ["run_benchmark.py", "--self-check"], "bench-baseline"),
     ("bench", ["test_rerun_compare.py"], "bench-rerun-compare"),
