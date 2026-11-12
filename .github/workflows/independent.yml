@@ -24,6 +24,12 @@ jobs:
           python -m pip install -r protocol/tests/conformance/requirements.txt
           python -m pip install nats-py
 
+      - name: Fetch official A2A proto (pinned, sha256-checked)
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/../a2a-official-spec"
+          curl -sfL "https://raw.githubusercontent.com/a2aproject/A2A/cfc9d34bc41e368827eb6446d31f912e44f795c5/specification/a2a.proto" -o "$GITHUB_WORKSPACE/../a2a-official-spec/a2a.proto"
+          echo "945df6e34001b2bfd0fd62d9484b63094dfad9d78705e41e2873441c419ae2d1  $GITHUB_WORKSPACE/../a2a-official-spec/a2a.proto" | sha256sum -c -
+
       - name: Independent verification record
         working-directory: stage2
         run: python verify_independent.py
