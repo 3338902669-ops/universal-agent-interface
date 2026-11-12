@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:universal-agent-interface:service-level:v1",
+  "title": "Universal Agent Interface Service Level Declaration v1",
+  "description": "SLA、结算与数据驻留字段。这些是声明，不是保证；与 NOT-GUARANTEED.md 冲突时以后者为准。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sla", "billing", "data_residency"],
+  "properties": {
+    "sla": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["response_s", "completion_s", "availability"],
+      "properties": {
+        "response_s": { "type": "integer", "minimum": 0 },
+        "completion_s": { "type": "integer", "minimum": 0 },
+        "availability": { "type": "string", "pattern": "^0\\.\\d{2}$" }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "rate_ref"],
+      "properties": {
+        "unit": { "type": "string", "enum": ["task", "token", "minute"] },
+        "rate_ref": { "type": ["string", "null"] }
+      }
+    },
+    "data_residency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["region", "max_classification"],
+      "properties": {
+        "region": { "type": "string", "minLength": 1 },
+        "max_classification": { "type": "string", "enum": ["public", "internal", "confidential", "restricted"] }
+      }
+    }
+  }
+}

@@ -136,6 +136,11 @@ def main() -> int:
 
 
     # ---------- B-03：SLA / 结算 / 驻留声明 ----------
+    # 词表统一（2026-11-12）：字段名以契约 §13 为唯一权威。
+    # service-level.schema.json v2 与 envelope.schema.json 的 $defs 同源（response_within_s/
+    # deadline_at/max_attempts、basis/unit_price/currency、store_in/may_leave/retention_days）。
+    # v1（PR #1 的 response_s/region）已废弃，原字节保档 service-level.schema.v1-pr1.json，
+    # 只许历史读取，不许新写入。
     sl_schema = load(os.path.join(UNI, "service-level.schema.json"))
     try:
         from jsonschema import Draft202012Validator
@@ -151,17 +156,34 @@ def main() -> int:
 
     if slv is not None:
         sl_ok = {
-            "sla": {"response_s": 5, "completion_s": 120, "availability": "0.99"},
-            "billing": {"unit": "task", "rate_ref": None},
-            "data_residency": {"region": "eu-west-1", "max_classification": "internal"},
+            "sla": {"response_within_s": 30, "max_attempts": 2,
+                    "deadline_at": "2026-11-13T00:00:00Z"},
+            "billing": {"basis": "per_task", "unit_price": None, "currency": "CNY"},
+            "residency": {"store_in": ["CN"], "may_leave": False, "retention_days": 0},
         }
-        check("B-03 合法样本通过", not list(slv.iter_errors(sl_ok)), "")
+        check("B-03 合法样本通过（契约 §13 字段）", not list(slv.iter_errors(sl_ok)), "")
         sl_bad = {
-            "sla": {"response_s": 5, "completion_s": 120, "availability": "0.99"},
-            "billing": {"unit": "task", "rate_ref": None},
-            "data_residency": {"max_classification": "internal"},
+            "sla": {"response_within_s": 30, "max_attempts": 2},
+            "billing": {"basis": "per_task"},
+            "residency": {"may_leave": False},          # 缺 store_in
         }
-        check("B-03 缺 region 被拒", bool(list(slv.iter_errors(sl_bad))), "")
+        check("B-03 缺 store_in 被拒", bool(list(slv.iter_errors(sl_bad))), "")
+        sl_bad2 = {"residency": {"store_in": ["china"]}}
+        check("B-03 非 ISO 区域被拒", bool(list(slv.iter_errors(sl_bad2))), "")
+        sl_bad3 = {"billing": {"basis": "per_hour"}}
+        check("B-03 未知 basis 被拒", bool(list(slv.iter_errors(sl_bad3))), "")
+        sl_bad4 = {"sla": {}, "billing": {"basis": "per_task", "unit_price": None,
+                                          "currency": "CNY"},
+                   "residency": {"store_in": ["CN"]},
+                   "data_residency": {"region": "x"}}
+        check("B-03 v1 字段 data_residency 被拒（防混引）",
+              bool(list(slv.iter_errors(sl_bad4))), "")
+
+        # 三块必须可选：与契约 §13「缺省即未声明 ≠ 无限制」一致
+        check("B-03 三块均为可选（顶层无 required）",
+              not sl_schema.get("required"), str(sl_schema.get("required")))
+        sl_empty = {}
+        check("B-03 空对象（全部未声明）合法", not list(slv.iter_errors(sl_empty)), "")
 
 
     print("\nRESULT: %d/%d passed" % (len(PASSES), len(PASSES) + len(FAILS)))

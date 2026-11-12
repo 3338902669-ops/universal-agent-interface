@@ -313,7 +313,8 @@
     "residency": {
       "type": "object",
       "additionalProperties": false,
-      "description": "数据驻留声明（§13.3）。may_leave 缺省按 false 处理。",
+      "description": "数据驻留声明（§13.3）。store_in 必填（声明驻留却不指明区域等于没声明）；may_leave 缺省按 false 处理。",
+      "required": ["store_in"],
       "properties": {
         "store_in": {
           "type": "array",

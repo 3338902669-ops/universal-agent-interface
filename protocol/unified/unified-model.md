@@ -100,14 +100,17 @@ scope         = action_digest
 
 ## 8 SLA / 结算 / 数据驻留（声明，不是保证）
 
-对应待完善项 **B-03**。机器可读副本：`service-level.schema.json`。
+对应待完善项 **B-03**。机器可读副本：`service-level.schema.json`（v2）。
 
-字段：
+**字段名以契约 §13 为唯一权威**（2026-11-12 词表统一）：
 
-- `sla.response_s` / `sla.completion_s`：声明的响应与完成时限（秒）
-- `sla.availability`：声明的可用度，形如 `0.xx`
-- `billing.unit`：`task` | `token` | `minute`；`billing.rate_ref` 为费率引用或 `null`
-- `data_residency.region`：驻留区域；`data_residency.max_classification`：`public` | `internal` | `confidential` | `restricted`
+- `sla.response_within_s` / `sla.deadline_at` / `sla.max_attempts`（§13.1）
+- `billing.basis` / `billing.unit_price`（null=未定价，不是 0）/ `billing.currency` / `billing.settle_to` / `billing.settlement_disputed`（§13.2）
+- `residency.store_in`（ISO 3166-1 alpha-2 数组）/ `residency.may_leave`（缺省 false）/ `residency.retention_days`（§13.3）
+- 三块**全部可选**，缺省即「未声明 ≠ 无限制」；未声明驻留时按最严处理（`unified.validate_residency` strict）
+
+历史版本 v1（PR #1：`response_s/completion_s/availability`、`data_residency.region`）已废弃，
+原字节保档 `service-level.schema.v1-pr1.json`，只许历史读取，**新写入一律用 v2 字段**。
 
 **这些字段是声明，不是保证。** 写入信封或服务描述不构成对时延、可用度、计费或驻留的承诺。与 `protocol/NOT-GUARANTEED.md` 冲突时，以不保证清单为准。
 

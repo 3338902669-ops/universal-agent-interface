@@ -1,38 +1,52 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:universal-agent-interface:service-level:v1",
-  "title": "Universal Agent Interface Service Level Declaration v1",
-  "description": "SLA、结算与数据驻留字段。这些是声明，不是保证；与 NOT-GUARANTEED.md 冲突时以后者为准。",
+  "$id": "urn:universal-agent-interface:service-level:v2",
+  "title": "Universal Agent Interface Service Level Declaration v2",
+  "description": "SLA、结算与数据驻留字段（契约 §13 的机器可读副本）。这些是声明，不是保证；与 NOT-GUARANTEED.md 冲突时以后者为准。字段名以契约 §13 为唯一权威；本文件 v1（PR #1，字段 response_s/region）已废弃，原文保档于 service-level.schema.v1-pr1.json。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["sla", "billing", "data_residency"],
   "properties": {
+    "sla": { "$ref": "#/$defs/sla" },
+    "billing": { "$ref": "#/$defs/billing" },
+    "residency": { "$ref": "#/$defs/residency" }
+  },
+  "$defs": {
     "sla": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["response_s", "completion_s", "availability"],
+      "description": "契约 §13.1。只描述承诺，不描述惩罚与判定；deadline_at 是对外承诺的绝对期限，与执行侧 timeout_s 不同。",
       "properties": {
-        "response_s": { "type": "integer", "minimum": 0 },
-        "completion_s": { "type": "integer", "minimum": 0 },
-        "availability": { "type": "string", "pattern": "^0\\.\\d{2}$" }
+        "response_within_s": { "type": "integer", "minimum": 0 },
+        "deadline_at": { "type": "string", "format": "date-time" },
+        "max_attempts": { "type": "integer", "minimum": 1 }
       }
     },
     "billing": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["unit", "rate_ref"],
+      "description": "契约 §13.2。unit_price=null 表示未定价，不得推断为 0。",
+      "required": ["basis"],
       "properties": {
-        "unit": { "type": "string", "enum": ["task", "token", "minute"] },
-        "rate_ref": { "type": ["string", "null"] }
+        "basis": { "enum": ["per_task", "per_token", "per_minute"] },
+        "unit_price": { "type": ["number", "null"], "minimum": 0 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "settle_to": { "type": ["string", "null"], "maxLength": 128 },
+        "settlement_disputed": { "type": "boolean" }
       }
     },
-    "data_residency": {
+    "residency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["region", "max_classification"],
+      "description": "契约 §13.3。store_in 必填（声明驻留却不指明区域等于没声明）；may_leave 缺省按 false 处理；越界写入必须以 residency_violation 拒绝并留审计（unified.validate_residency）。",
+      "required": ["store_in"],
       "properties": {
-        "region": { "type": "string", "minLength": 1 },
-        "max_classification": { "type": "string", "enum": ["public", "internal", "confidential", "restricted"] }
+        "store_in": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Z]{2}$" },
+          "minItems": 1
+        },
+        "may_leave": { "type": "boolean", "default": false },
+        "retention_days": { "type": "integer", "minimum": 0 }
       }
     }
   }
