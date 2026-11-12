@@ -120,6 +120,9 @@ class EventBridge:
                 except Exception:
                     continue
                 self._seen.add(_key(ev))
+                # F3（agent-15 反例）：重启后调用方直接重试旧列表 write 时，
+                # _written 必须也从 outbox 恢复，否则同一事件会写两遍。
+                self._written.add(_key(ev))
                 tid = ev.get("task_id") or (ev.get("task") or {}).get("id")
                 if not tid:
                     continue
@@ -372,10 +375,15 @@ class EventBridge:
 
             prev = self._verdict_emitted.get(tid)
             internal = self._states.get(tid)
+            used_fallback = False
             if internal is None and fallback_state and tid in fallback_state:
-                # F4：同批已有终态 TASK_EVENT —— 用它做状态兜底，保住裁定的独立时序
+                # F4：同批已有终态 TASK_EVENT —— 用它做状态兜底，保住裁定的独立时序。
+                # 兜底时 final 必须为 False：真正的 final 由随后的 completed 事件携带
+                # 裁定发出（单终态）；否则 completed+VERDICT 同批会出两条 final
+                # （agent-15 复核反例实锤）。
                 internal = fallback_state[tid]
                 self._states[tid] = internal
+                used_fallback = True
             if internal is None:
                 err_synth = "verdict_without_state:%s:%s" % (tid, canon)
                 if ("synth", err_synth) not in self._seen:
@@ -403,7 +411,8 @@ class EventBridge:
                         "timestamp": rec.get("ts"),
                         "metadata": meta,
                     },
-                    "final": internal in TERMINAL_STATES and not defer_final,
+                    # used_fallback：兜底状态不是账本 TASK_STATE，final 让给随后的 completed
+                    "final": internal in TERMINAL_STATES and not defer_final and not used_fallback,
                     "uai/synth": synth,
                     "uai/source": "VERDICT",
                 }
@@ -521,24 +530,68 @@ class EventBridge:
 
     # ---- F1b：指针永久缺席时的显式逃生口 ----
     def force_pending_flush(self) -> list[dict]:
-        """发布 pending 中除 result_ready 外的全部事件。
+        """冲刷 pending 队列。
 
-        指针迟到时 artifact 仍会在指针到账的批次按 uai/seq 补发；
-        本方法只解决"终态被一个永远不会来的指针永久扣压"。
-        操作方（如 --flush-pending 或运维脚本）显式调用，drain 不自动触发，
+        顺序敏感：必须**先 absorb 全部 TASK_STATE**（补上迟到的状态与指针），
+        再处理 VERDICT（可用 fallback_state 保住裁定）与其他事件——否则
+        VERDICT 先于 TASK_STATE 处理时会报 verdict_without_state（agent-15
+        反例：flushed 里 VERDICT 变 bridge_error、completed 变「待核验」）。
+
+        result_ready 无指针时无法投影 artifact，保留等待。
+        操作方（--flush-pending / 运维脚本）显式调用，drain 不自动触发，
         保持"等指针"作为默认语义。
         """
         out = []
         pending = self._pending_results
         self._pending_results = []
+
+        # 第一遍：absorb 全部 TASK_STATE 与 VERDICT（状态、迟到指针、裁定值先就位，
+        # 2a 的 completed 才能携带裁定发出 final，而不是「待核验」）
+        deferred = []
         for rec in pending:
-            if rec.get("kind") == "result_ready":
-                # result_ready 无指针仍无法投影成 artifact，继续保留等待
-                self._pending_results.append(rec)
-                continue
-            ev = self.convert(rec)
-            if ev is not None:
-                out.append(ev)
+            if rec.get("record") in ("TASK_STATE", "VERDICT"):
+                rp = rec.get("result_pointer")
+                if isinstance(rp, dict) and rp.get("uri"):
+                    self._pointers[rec.get("task_id")] = rp
+                self._absorb(rec)
+            deferred.append(rec)
+
+        # 第二遍：先处理终态 TASK_EVENT（completed 携带裁定发 final），
+        # 再处理 VERDICT（同值不再发）、最后 TASK_STATE（仅当该任务尚无
+        # 事件路径 final 时才 synth——否则 flush 会出双终态，agent-15 反例变体）。
+        fallback_state = {}
+        for rec in deferred:
+            if (rec.get("record") == EVENT_SOURCE
+                    and rec.get("kind") in ("completed", "failed", "cancelled")):
+                fallback_state.setdefault(rec.get("task_id"), {
+                    "completed": "SUCCEEDED", "failed": "FAILED",
+                    "cancelled": "CANCELLED"}[rec["kind"]])
+
+        # 2a. 终态 TASK_EVENT（completed 等）——事件路径，携带裁定发 final
+        for rec in deferred:
+            if (rec.get("record") == EVENT_SOURCE
+                    and rec.get("kind") in ("completed", "failed", "cancelled")):
+                ev = self.convert(rec)
+                if ev is not None:
+                    out.append(ev)
+
+        # 2b. VERDICT —— 同值不再发（_verdict_emitted 已被 2a 的 completed 更新）
+        for rec in deferred:
+            if rec.get("record") == "VERDICT":
+                out.extend(self.synth_verdicts([rec], fallback_state=fallback_state))
+
+        # 2c. TASK_STATE —— 只补发仍缺终态的任务
+        for rec in deferred:
+            if rec.get("record") == "TASK_STATE":
+                tid = rec.get("task_id")
+                if rec.get("state") in TERMINAL_STATES and tid not in self._final_emitted:
+                    out.extend(self.synth_terminal([rec]))
+
+        # result_ready 仍无指针的，放回 pending 继续等待
+        for rec in deferred:
+            if rec.get("record") == EVENT_SOURCE and rec.get("kind") == "result_ready":
+                if not (rec.get("result_ref") or self._pointers.get(rec.get("task_id"))):
+                    self._pending_results.append(rec)
         return out
 
     def close(self):

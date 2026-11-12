@@ -1,13 +1,18 @@
-"""F1–F4 隔离反例：天枢静态审读提出的四个风险，逐个实测定性。
+"""F1–F4 隔离反例：天枢静态审读 + agent-15 独立复核的缺陷，逐个实测定性。
 
-回执原文（RE-tianshu-event-bridge-verify-20261112.md）：
+第一轮（天枢回执 RE-tianshu-event-bridge-verify-20261112.md）：
   F1 缺结果指针可能永久阻塞该任务；
   F2 重复序号且缺状态兜底可能吞终态；
   F3 部分追加后使用同一列表重试可能重复；
   F4 裁定先于状态时独立时序可能丢失。
 
-判定口径：每个反例给出 PASS（无此缺陷）/ CONFIRMED（缺陷成立，附最小修复）/ QUALIFIED。
-不编造：bridge 行为以实跑输出为准。
+第二轮（agent-15 复核回执 RE-agent15-eventbridge-reverify-20261112.md，FAIL）：
+  F1b' force_pending_flush 只调 convert，静默丢弃挂起的 VERDICT/TASK_STATE；
+  F3'  重启后 _written 不恢复，直接重试旧列表 → outbox 2 行变 4 行；
+  F4'  fallback 路径 final=True + completed final=True = 两条 final；
+  0'   探针退出码恒 0，CONFIRMED 无法被 CI 捕获。
+
+以上全部纳入本探针。判定口径：PASS / CONFIRMED；main 返回非 0 当存在 CONFIRMED。
 """
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ PASSES, CONFIRMED, NOTES = [], [], []
 def report(kind, name, detail=""):
     {"PASS": PASSES, "CONFIRMED": CONFIRMED, "NOTE": NOTES}[kind].append(name)
     print("%-10s %-56s %s" % (kind, name, detail))
+    return kind == "PASS"
 
 
 def make(tmp: Path):
@@ -60,9 +66,9 @@ def outbox_lines(out: Path):
 
 
 def main() -> int:
+    all_ok = True
+
     # ---------- F1：result_ready 永远等不到指针 → 任务永久阻塞？ ----------
-    # 场景：账本里 result_ready 之后再无 TASK_STATE（指针永远不来）。
-    # 期望：不吞事件也不崩；桥对该任务保持 pending，但**不影响其他任务**。
     tmp = Path(tempfile.mkdtemp(prefix="f1-"))
     led = make(tmp)
     append(led, {"record": "TASK_EVENT", "task_id": "f1a", "seq": 1, "kind": "result_ready"},
@@ -70,21 +76,30 @@ def main() -> int:
     b = EventBridge(tmp, tmp / "data" / "o.jsonl", experimental_test_only=True)
     evs = flush(b)
     kinds = [e["kind"] for e in evs]
-    report("PASS" if kinds == ["task"] and not any(e.get("task_id") == "f1a" for e in evs)
-           else "CONFIRMED",
-           "F1 无指针任务不阻塞他任务", "kinds=%s" % kinds)
-    # 终态来临但指针永远缺席：completed 会被扣压（默认语义=等指针），
-    # 但 force_pending_flush() 逃生口必须能把它发布出来（F1b 修复）。
-    append(led, {"record": "TASK_EVENT", "task_id": "f1a", "seq": 2, "kind": "completed"})
+    all_ok &= report("PASS" if kinds == ["task"] and not any(e.get("task_id") == "f1a" for e in evs)
+                     else "CONFIRMED",
+                     "F1 无指针任务不阻塞他任务", "kinds=%s" % kinds)
+    # F1b（含 agent-15 反例）：默认扣压；逃生口必须按类型路由整条挂起链——
+    # VERDICT 走 synth、TASK_STATE 先 absorb 指针，completed 终态带裁定而非「待核验」。
+    append(led, {"record": "VERDICT", "task_id": "f1a", "verdict": "通过"},
+           {"record": "TASK_STATE", "task_id": "f1a", "state": "SUCCEEDED"},
+           {"record": "TASK_EVENT", "task_id": "f1a", "seq": 2, "kind": "completed"})
     evs2 = flush(b)
     finals_default = [e for e in evs2 if e.get("final")]
     flushed = b.force_pending_flush()
     b.write(flushed)
     lines = outbox_lines(tmp / "data" / "o.jsonl")
     finals_after = [e for e in lines if e.get("final") and e.get("task_id") == "f1a"]
-    report("PASS" if not finals_default and len(finals_after) == 1 else "CONFIRMED",
-           "F1b 默认扣压 + force_pending_flush 逃生口发布终态",
-           "default_finals=%d after_flush=%d" % (len(finals_default), len(finals_after)))
+    texts_after = [(e.get("status") or {}).get("message", {}).get("parts", [{}])[0].get("text")
+                   for e in lines if e.get("task_id") == "f1a" and e.get("status")]
+    # 权威口径：completed 携带裁定发 1 条 final（text=通过）；
+    # VERDICT 同值 update 被 _verdict_emitted 拦下不算缺陷（durability 语义）。
+    ok = (not finals_default and len(finals_after) == 1
+          and texts_after == ["通过"])
+    all_ok &= report("PASS" if ok else "CONFIRMED",
+                     "F1b 逃生口发布整条挂起链（终态带裁定，非待核验）",
+                     "default_finals=%d after=%d verdict_texts=%s"
+                     % (len(finals_default), len(finals_after), texts_after))
     b.close()
 
     # ---------- F2：重复 seq 且缺 TASK_STATE 兜底 → 吞终态？ ----------
@@ -104,30 +119,38 @@ def main() -> int:
     # 重启后不得重复
     b = restart(b)
     evs3 = flush(b)
-    report("PASS" if errs and errs_persisted and not evs3 else "CONFIRMED",
-           "F2 重复 seq 终态 → bridge_error 审计（不静默吞，重启不重复）",
-           "errs=%d persisted=%d after_restart=%d"
-           % (len(errs), len(errs_persisted), len(evs3)))
+    all_ok &= report("PASS" if errs and errs_persisted and not evs3 else "CONFIRMED",
+                     "F2 重复 seq 终态 → bridge_error 审计（不静默吞，重启不重复）",
+                     "errs=%d persisted=%d after_restart=%d"
+                     % (len(errs), len(errs_persisted), len(evs3)))
     b.close()
 
-    # ---------- F3：write 失败后同批列表重试 → 重复？ ----------
-    # durability 套件已覆盖 write 失败重试（same process & after restart）。
-    # 这里实测「同一列表二次 write」是否产生重复行。
+    # ---------- F3：write 重试幂等（同进程 + 跨重启，agent-15 反例） ----------
+    # agent-15 实测：重启后 _written 不恢复，直接重试旧列表 → outbox 2 行变 4 行。
+    # 修复：_load_emitted 与 _seen 同源恢复 _written。
     tmp = Path(tempfile.mkdtemp(prefix="f3-"))
     led = make(tmp)
     append(led, {"record": "TASK_EVENT", "task_id": "f3", "seq": 1, "kind": "accepted"})
     b = EventBridge(tmp, tmp / "data" / "o.jsonl", experimental_test_only=True)
     evs = flush(b)
-    b.write(evs)  # 同一列表故意再写一次
-    lines = outbox_lines(tmp / "data" / "o.jsonl")
-    report("CONFIRMED" if len(lines) > len(evs) else "PASS",
-           "F3 同一列表二次 write 重复",
-           "events=%d outbox_lines=%d" % (len(evs), len(lines)))
     b.close()
+    b2 = EventBridge(tmp, tmp / "data" / "o.jsonl", experimental_test_only=True)
+    b2.write(evs)               # 跨重启直接重试同一列表
+    lines = outbox_lines(tmp / "data" / "o.jsonl")
+    rc = b2.write(evs)          # 同进程再试一次
+    lines2 = outbox_lines(tmp / "data" / "o.jsonl")
+    all_ok &= report("PASS" if len(lines) == len(evs) and len(lines2) == len(evs) and rc == 0
+                     else "CONFIRMED",
+                     "F3 跨重启+同进程重试 write 均幂等",
+                     "after_restart=%d after_retry=%d expected=%d"
+                     % (len(lines), len(lines2), len(evs)))
+    b2.close()
 
-    # ---------- F4：VERDICT 先于 TASK_STATE → 独立时序丢失？ ----------
-    # F4 修复后语义：先到的裁定按自己的时序发布（uai/source=VERDICT, final=False），
-    # completed 随后携带裁定发出终态——两条都在，独立时序保住。
+    # ---------- F4：VERDICT 先于 TASK_STATE → 独立时序与单终态 ----------
+    # agent-15 反例：fallback 路径 final=True + completed final=True = 两条 final。
+    # 修复：used_fallback 时裁定 final=False，completed 携带裁定单独发 final。
+    tmp = Path(tempfile.mkdtemp(prefix="f4-"))
+    led = make(tmp)
     append(led, {"record": "VERDICT", "task_id": "f4", "verdict": "通过", "ts": "T1"},
            {"record": "TASK_STATE", "task_id": "f4", "state": "SUCCEEDED", "ts": "T2"},
            {"record": "TASK_EVENT", "task_id": "f4", "seq": 1, "kind": "completed", "ts": "T3"})
@@ -136,16 +159,21 @@ def main() -> int:
     verdict_updates = [e for e in evs if e.get("uai/source") == "VERDICT"]
     finals = [e for e in evs if e.get("final")]
     texts = [(e.get("status") or {}).get("message", {}).get("parts", [{}])[0].get("text") for e in finals]
-    ok = len(verdict_updates) == 1 and "通过" in (texts or [])
-    report("PASS" if ok else "CONFIRMED",
-           "F4 先到的裁定按独立时序发布（1 update + 1 final 带裁定）",
-           "verdict_updates=%d finals=%s" % (len(verdict_updates), texts))
+    ok = (len(verdict_updates) == 1 and verdict_updates[0].get("final") is False
+          and len(finals) == 1 and "通过" in (texts or []))
+    all_ok &= report("PASS" if ok else "CONFIRMED",
+                     "F4 fallback 裁定 final=False + completed 单终态带裁定",
+                     "updates=%d update_final=%s finals=%s"
+                     % (len(verdict_updates),
+                        verdict_updates[0].get("final") if verdict_updates else None,
+                        texts))
     b.close()
 
     print("\nSUMMARY: PASS=%d CONFIRMED=%d NOTE=%d"
           % (len(PASSES), len(CONFIRMED), len(NOTES)))
     print("CONFIRMED: %s" % "; ".join(CONFIRMED))
-    return 0
+    # agent-15 指出：退出码恒 0 使 CONFIRMED 无法被 CI 捕获——已改为非 0。
+    return 0 if all_ok and not CONFIRMED else 1
 
 
 if __name__ == "__main__":
