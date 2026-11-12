@@ -97,7 +97,20 @@ scope         = action_digest
 
 三仓 CI 必须跑同一份 `check-cross-repo-vocab.py`。任一侧枚举漂移即红。
 
----
 
+## 8 SLA / 结算 / 数据驻留（声明，不是保证）
+
+对应待完善项 **B-03**。机器可读副本：`service-level.schema.json`。
+
+字段：
+
+- `sla.response_s` / `sla.completion_s`：声明的响应与完成时限（秒）
+- `sla.availability`：声明的可用度，形如 `0.xx`
+- `billing.unit`：`task` | `token` | `minute`；`billing.rate_ref` 为费率引用或 `null`
+- `data_residency.region`：驻留区域；`data_residency.max_classification`：`public` | `internal` | `confidential` | `restricted`
+
+**这些字段是声明，不是保证。** 写入信封或服务描述不构成对时延、可用度、计费或驻留的承诺。与 `protocol/NOT-GUARANTEED.md` 冲突时，以不保证清单为准。
+
+---
 - 版本：v1，2026-11-12
 - 变更：任何枚举变更必须先改本文件与 `evidence-floor.json`，再改实现

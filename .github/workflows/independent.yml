@@ -1,0 +1,43 @@
+name: independent
+
+# Independent re-run job. Must not share a cache with conformance.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  independent:
+    name: independent stage2 re-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (no cache)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r protocol/tests/conformance/requirements.txt
+          python -m pip install nats-py
+
+      - name: Fetch official A2A proto (pinned, sha256-checked)
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/../a2a-official-spec"
+          curl -sfL "https://raw.githubusercontent.com/a2aproject/A2A/cfc9d34bc41e368827eb6446d31f912e44f795c5/specification/a2a.proto" -o "$GITHUB_WORKSPACE/../a2a-official-spec/a2a.proto"
+          echo "945df6e34001b2bfd0fd62d9484b63094dfad9d78705e41e2873441c419ae2d1  $GITHUB_WORKSPACE/../a2a-official-spec/a2a.proto" | sha256sum -c -
+
+      - name: Independent verification record
+        working-directory: stage2
+        run: python verify_independent.py
+
+      - name: Upload evidence record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-evidence
+          path: evidence/independent-*.json
+          if-no-files-found: warn

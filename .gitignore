@@ -28,3 +28,14 @@ bench/controlled_experiment/raw/_work/
 
 # 与远端同步用的本地副本目录
 stage2-remote/
+
+# Packaging and coverage output
+build/
+dist/
+*.egg-info/
+.coverage
+htmlcov/
+
+# E-02 published fixtures (root 'fixtures/' would otherwise ignore them)
+!bench/controlled_experiment/fixtures/
+!bench/controlled_experiment/fixtures/**

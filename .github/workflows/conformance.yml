@@ -23,6 +23,13 @@ jobs:
           python -m pip install -r protocol/tests/conformance/requirements.txt
           python -m pip install nats-py
 
+      # 两条来源合并：本仓已入库官方 proto 的未修改副本（a2a-official-spec/），
+      # 这里再拿 pin 死的上游 sha256 校验它没漂移。校验不需要联网，
+      # 因此既拿到「防漂移」的价值，又不引入 raw.githubusercontent 这个新失败点。
+      - name: Verify in-repo official A2A proto against pinned upstream hash
+        run: |
+          echo "945df6e34001b2bfd0fd62d9484b63094dfad9d78705e41e2873441c419ae2d1  a2a-official-spec/a2a.proto" | sha256sum -c -
+
       - name: Protocol conformance (22 checks)
         working-directory: protocol/tests/conformance
         run: python run_conformance.py

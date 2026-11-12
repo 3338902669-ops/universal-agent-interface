@@ -1,0 +1,12 @@
+{"task_id":"T01","condition":"without_orchestration","output":"带注通过","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":4e-06}
+{"task_id":"T02","condition":"without_orchestration","output":"deadbeef","score":0,"channel_failure":false,"capability_failure":true,"error_code":null,"error":null,"duration_s":2e-06}
+{"task_id":"T03","condition":"without_orchestration","output":"TASK_STATE_SUBMITTED","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":1e-06}
+{"task_id":"T04","condition":"without_orchestration","output":"command,revision","score":0,"channel_failure":false,"capability_failure":true,"error_code":null,"error":null,"duration_s":1e-06}
+{"task_id":"T05","condition":"without_orchestration","output":"no","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":1e-06}
+{"task_id":"T06","condition":"without_orchestration","output":"","score":null,"channel_failure":true,"capability_failure":false,"error_code":"empty_channel","error":"stub: session dropped before a scorable output arrived","duration_s":1e-06}
+{"task_id":"T01","condition":"with_orchestration","output":"带注通过","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":1e-06}
+{"task_id":"T02","condition":"with_orchestration","output":"997802e23905e64e8ff0c2c7ce5d5335e45a9339c1513094085a556d91c4e8ac","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":1.4e-05}
+{"task_id":"T03","condition":"with_orchestration","output":"TASK_STATE_SUBMITTED","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":1e-06}
+{"task_id":"T04","condition":"with_orchestration","output":"command,exit_code,revision","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":0.0}
+{"task_id":"T05","condition":"with_orchestration","output":"no","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":1e-06}
+{"task_id":"T06","condition":"with_orchestration","output":"blocked","score":1,"channel_failure":false,"capability_failure":false,"error_code":null,"error":null,"duration_s":1e-06}
