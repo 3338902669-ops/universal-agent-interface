@@ -298,6 +298,12 @@ class EventBridge:
             # final 让给随后的 completed（agent-15 r2 反例）
             internal = fallback_state[tid]
             used_fallback = True
+        # v1 权威行为（P2/反例3 场景，v1 三轮复核后实测）：
+        # 同批积压重放中「先 completed 判定待定、后 TASK_STATE 落定」时，
+        # VERDICT update 一律 final=False（由 completed 或 synth 携带最终裁定的
+        # 那条发唯一 final）——v1 的 defer_final 语义。判定方式：同批内该任务
+        # 还有终态 TASK_STATE 或终态 TASK_EVENT 未处理时，update 不带 final。
+        defer_final = tid in fallback_state or t.get("awaiting_terminal_state")
         if not internal:
             synth = "verdict_without_state:%s:%s" % (tid, canon)
             return [{"kind": "bridge_error", "task_id": tid, "uai/synth": synth,
@@ -319,8 +325,9 @@ class EventBridge:
                        "message": {"parts": [{"text": canon}]},
                        "timestamp": rec.get("ts"),
                        "metadata": meta},
-            # used_fallback：兜底不是账本 TASK_STATE，final 让给 completed
-            "final": internal in TERMINAL_STATES and not used_fallback,
+            # used_fallback / defer_final：兜底或同批有终态未落定时，final 让给
+            # completed / synth 那条（v1 defer_final 权威语义，反例3 修复）
+            "final": internal in TERMINAL_STATES and not used_fallback and not defer_final,
             "uai/synth": "verdict:%s:%s" % (tid, rec.get("_bridge_offset", canon)),
             "uai/source": "VERDICT",
         }]
@@ -378,6 +385,13 @@ class EventBridge:
             if not tid:
                 continue
             t = self._task(tid)
+
+            # v1 defer_final 语义（反例3）：同批内该任务存在终态 TASK_STATE 或
+            # 终态 TASK_EVENT 时，VERDICT update 的 final 让给终态那条。
+            # 每批开始时标记，_emit_verdict 读取。
+            if (kind == EVENT_SOURCE and rec.get("kind") in EVENT_TO_STATE) \
+                    or (kind == "TASK_STATE" and rec.get("state") in TERMINAL_STATES):
+                t["awaiting_terminal_state"] = True
 
             if kind == EVENT_SOURCE and type(rec.get("seq")) is not int:
                 # INV-5：非法 seq → 审计（不扣压——N4 反例）
