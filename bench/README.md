@@ -117,7 +117,7 @@ python manifest.py --verify MANIFEST.json   # 不一致即 rc=2，拒跑
 
 ## 6 独立复跑门（E-04）
 
-`ci_suites.py` 把 20 个套件跑成一份**语义清单**（只留 PASS/FAIL 判据名 + 退出码，
+`ci_suites.py` 把 24 个套件跑成一份**语义清单**（只留 PASS/FAIL 判据名 + 退出码，
 剔除 pid/耗时/临时路径），`compare_reruns.py` 判定两份清单是否逐套件等价。
 `.github/workflows/independent-verification.yml` 用两台独立 runner 各跑一次再比对。
 

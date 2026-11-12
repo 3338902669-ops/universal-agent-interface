@@ -1,5 +1,11 @@
 # 云端交接：待完成项与完成指南（2026-11-12）
 
+> **状态：历史文件（2026-11-13 加注）。** 本文 §3 的 11 项已基本落地（PR #1 已合并），
+> 文中「当前基线：stage2 12 个套件 224 条用例 / conformance 17/17」**已过时**——
+> 现行数字是 **24 套件**、**conformance 22/22**（见 `bench/ci_suites.py`、
+> `protocol/tests/conformance/run_conformance.py`）。请以仓库当前 HEAD 为准，
+> 不要把本文基线当成待守门槛。
+
 > 本文件供 **GrokBot（云端）** 在没有本机访问权的情况下独立完成剩余工作。
 > 一切以 GitHub 仓库为准：`https://github.com/3338902669-ops/universal-agent-interface`
 
@@ -46,7 +52,7 @@
 | 账本哈希链 | `stage2/ledger_chain.py` |
 | 故障注入统一格式 | `protocol/unified/fault-injection.schema.json` |
 
-**当前基线：`stage2` 12 个套件 224 条用例全绿，`protocol/tests/conformance` 17/17。**
+**基线（2026-11-12 当日；已过时，见文首状态注）：`stage2` 12 个套件 224 条用例全绿，`protocol/tests/conformance` 17/17。**
 任何改动必须保持这两组不退化。
 
 ---
