@@ -20,6 +20,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,19 @@ REQUIRES_LAB: dict[str, tuple[str, str]] = {
     "stage2-test_a02_inbound": ("NATS_URL", "requires_lab_nats_and_hub"),
 }
 
+
+def _has_runtime_binary() -> bool:
+    """A-05 要在真 runtime 上跑（codex 原生 / dsh 适配）；干净 runner 上没有装。"""
+    if os.environ.get("UAI_RUNTIME_BIN"):
+        return True
+    return any(shutil.which(x) for x in ("dsh", "codex", "codex.exe", "dsh.exe"))
+
+
+# 前置条件不是环境变量而是「机器上得真有这个东西」
+PREREQ: dict[str, tuple[object, str]] = {
+    "stage2-test_a05_second_runtime": (_has_runtime_binary, "requires_real_runtime_binary"),
+}
+
 # 只保留语义行：PASS/FAIL 名称与计数
 SIGNAL_RE = re.compile(r"^(PASS|FAIL)\b|^RESULT:|^[A-Za-z0-9_.-]+:\s*(PASS|FAIL)\b|^ok\b|^not ok\b|^[0-9]+/[0-9]+")
 
@@ -66,6 +80,9 @@ def run_suite(workdir: str, argv: list[str], name: str) -> dict:
     lab = REQUIRES_LAB.get(name)
     if lab and not os.environ.get(lab[0]):
         return {"name": name, "skipped": True, "reason": lab[1]}
+    pre = PREREQ.get(name)
+    if pre and not pre[0]():
+        return {"name": name, "skipped": True, "reason": pre[1]}
     try:
         proc = subprocess.run(
             [sys.executable, *argv],
