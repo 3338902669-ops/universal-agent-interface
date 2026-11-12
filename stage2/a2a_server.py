@@ -184,8 +184,9 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if path.startswith("/tasks/") and path.endswith("/events"):
-            tid = path[len("/tasks/"):-len("/events")]
-            return self._stream_events(tid)
+            # The legacy stream silently drops partial records and artifacts.
+            # Fail closed until the streaming path is rebuilt and verified.
+            return self._send(503, {"error": "stream_disabled_pending_durability_repair"})
 
         if path.startswith("/tasks/"):
             tid = path[len("/tasks/"):]

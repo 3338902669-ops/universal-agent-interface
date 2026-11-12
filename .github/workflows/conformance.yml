@@ -42,7 +42,7 @@ jobs:
           python test_bridge_joins.py
           python test_unified.py
           python test_protocol_specs.py
-          python test_a03_stream.py
+          python -m unittest -v test_stream_gate
           python test_identity.py
           python test_p1_batch.py
           python test_a09_singleton.py
