@@ -102,7 +102,7 @@ def main() -> int:
         for e in errs:
             print("  ! " + e)
     else:
-        print("SELF-CHECK PASS：四档单调改善，且 T3 的 wrong_accepted=0")
+        print("SELF-CHECK PASS：满足仿真模型内置断言；结果不证明真实系统性能")
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

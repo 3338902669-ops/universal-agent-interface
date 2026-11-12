@@ -146,6 +146,15 @@ def summarize(raw: Path) -> dict[str, Any]:
     with_r = by_condition["with_orchestration"]["exact_match_rate"]
     without_r = by_condition["without_orchestration"]["exact_match_rate"]
     delta = None if (with_r is None or without_r is None) else (with_r - without_r)
+    indexed = {(t['condition'], t['task_id']): t for t in trials}
+    paired = [(indexed['with_orchestration', task_id],
+               indexed['without_orchestration', task_id])
+              for task_id in by_id
+              if not indexed['with_orchestration', task_id]['channel_failure']
+              and not indexed['without_orchestration', task_id]['channel_failure']]
+    paired_delta = (sum(int(with_trial['score'] == 1) - int(without_trial['score'] == 1)
+                        for with_trial, without_trial in paired) / len(paired)
+                    if paired else None)
 
     return {
         "raw": str(raw),
@@ -156,6 +165,13 @@ def summarize(raw: Path) -> dict[str, Any]:
             "exact_match_rate": overall["exact_match_rate"],
             "mean_score": overall["mean_score"],
             "orchestration_delta": delta,
+            "paired_orchestration_delta": paired_delta,
+        },
+        "pairing": {
+            "n_tasks": len(by_id),
+            "n_paired": len(paired),
+            "coverage": rate(len(paired), len(by_id)),
+            "interpretation": "Descriptive comparisons only; unpaired rates can reflect differing samples. Paired results cover only tasks scored in both conditions and do not by themselves establish causality.",
         },
         "overall": overall,
         "by_condition": by_condition,
@@ -176,13 +192,16 @@ def main() -> int:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     m = summary["metrics"]
     print(
-        "RESULT: M1_channel=%.4f M2_capability=%s M3_exact=%s M4_mean=%s M5_delta=%s"
+        "RESULT: M1_channel=%.4f M2_capability=%s M3_exact=%s M4_mean=%s M5_delta=%s paired_delta=%s paired_coverage=%d/%d"
         % (
             m["channel_failure_rate"] if m["channel_failure_rate"] is not None else float("nan"),
             "null" if m["capability_failure_rate"] is None else "%.4f" % m["capability_failure_rate"],
             "null" if m["exact_match_rate"] is None else "%.4f" % m["exact_match_rate"],
             "null" if m["mean_score"] is None else "%.4f" % m["mean_score"],
             "null" if m["orchestration_delta"] is None else "%.4f" % m["orchestration_delta"],
+            "null" if m["paired_orchestration_delta"] is None else "%.4f" % m["paired_orchestration_delta"],
+            summary["pairing"]["n_paired"],
+            summary["pairing"]["n_tasks"],
         )
     )
     return 0

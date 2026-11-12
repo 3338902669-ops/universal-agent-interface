@@ -2,18 +2,18 @@
 
 本目录是 `bench/README.md` §3「五席能力测试电池」的**可复现包**：冻结判分、同题逐字一致、仅按条件替换编排、隔离会话、通道失败与能力失败分计。
 
-它证明的是：**在控制变量保持不变时，有无 skill 编排是否改变机械判分结果**。它不证明任何模型的真实能力，除非 `RESULTS.md` 里写明了一次真实模型运行（本包默认跑确定性 stub 自检；缺密钥时不得假装跑过模型）。
+当前程序仅是实验工具原型，**不能测量编排的因果效果**：处理组直接收到包含题目答案的协议摘录，没有调用编排器；两组所获信息不同。stub 结果是预设行为，不是模型能力或机制收益。真实模型实验尚需重新设计对照、冻结输入并独立验证。
 
 ---
 
 ## 1 自变量（independent variable）
 
-唯一自变量是 **是否启用 skill 编排（skill orchestration）**：
+当前改变的是 **是否提供含答案的附加材料**，不是经过隔离的编排机制：
 
 | 水平 | 值 | 含义 |
 |---|---|---|
 | 对照 | `without_orchestration` | 席位只拿到题目文本，没有 skill / 参考手册 / 编排器 |
-| 处理 | `with_orchestration` | 席位拿到**同一份冻结的 skill pack**（协议摘录，派单前哈希冻结），可由编排器检索后作答 |
+| 处理 | `with_orchestration`（历史字段名） | 直接向提示词加入协议摘录；未调用编排器或检索器 |
 
 禁止同时改变模型、工具、权限或工作区。禁止在对照水平偷偷塞进 skill pack。
 
@@ -29,7 +29,7 @@
 | M2 | `capability_failure_rate` | 在非通道失败的 trial 中，`score == 0` 的比例 |
 | M3 | `exact_match_rate` | 在非通道失败的 trial 中，`score == 1` 的比例 |
 | M4 | `mean_score` | 在非通道失败的 trial 中，`score` 的算术平均 |
-| M5 | `orchestration_delta` | `exact_match_rate(with_orchestration) - exact_match_rate(without_orchestration)` |
+| M5 | `orchestration_delta`（历史名称） | 两组各自准确率的描述性差值；不能证明编排效果。另报告同题两组均有效的配对差值与覆盖率。 |
 
 若某一水平的全部 trial 都是通道失败，则该水平的 M2/M3/M4 为 `null`，M5 亦为 `null`（不得把「通道没通」写成「能力为 0」）。指标按「全体」与「分水平」同时给出。
 
@@ -40,7 +40,7 @@
 | 控制变量 | 如何冻结 |
 |---|---|
 | 模型（model） | 同一 backend、同一模型名；stub 自检时 backend 固定为 `stub` |
-| 工具（tools） | 两个水平可用工具集相同；编排水平多的只是 skill pack 只读检索，不新增写工具 |
+| 工具（tools） | 当前 HTTP 路径未调用工具或检索；两组材料不同，无法把差异归因于编排 |
 | 权限（permissions） | 同一工作区权限；不得在处理水平开放对照水平没有的网络或密钥 |
 | 工作区快照（workspace snapshot） | 同一 git revision、同一 `fixtures/tasks.jsonl` 字节哈希、同一 `scoring.py` 字节哈希；判分脚本在派单前冻结 |
 | 题目文本 | 同题逐字一致，禁止按席改写题干 |
