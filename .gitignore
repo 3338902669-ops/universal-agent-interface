@@ -20,5 +20,8 @@ adapters/verification-seat/runtime/
 # 复跑产物
 rerun-*.json
 
+# lab 运行时 pid/端口（每次 start 重生）
+bench/.lab-pids.json
+
 # 与远端同步用的本地副本目录
 stage2-remote/
