@@ -1,6 +1,8 @@
 # EventBridge v2 重写规格：不变量先行（2026-11-13）
 
-状态：**设计稿 v1，待核验**。核验通过前不写实现代码。
+状态：**设计稿 v2（已并入规格核验修订 N1–N3 与 §4 四点修正），实现已授权**。
+核验：`RE-spec-reviewer-evbridge-v2-20261113.md` 判定 SPEC_PASS_WITH_NOTES；
+本 v2 即修订稿，核验条件（N1/N2/N3 + §4 四点）已全部并入，无未决项。
 背景：三轮独立复核（RE-tianshu-event-bridge-verify + RE-agent15 r1/r2/r3）证明现有桥的
 缺陷是结构性的——两个互相冲突的生命周期路径（drain 的等待守卫 vs flush 的绕过路由），
 加上从 outbox 回读重建的跨崩溃状态，无法靠补丁收敛。
@@ -87,9 +89,15 @@ data/
 ### INV-4 final 单调且至多一源
 对外 final 事件的序列 = 账本真实时点序列，允许多条（每条裁定 update 都是 final，
 durability 权威语义），但必须满足：
-  a. 一旦某任务发生过 final，后续同值裁定不重复发布（`verdicts_emitted` 尾部去重）；
-  b. 事件路径 final 与 synth 路径 final 不得对同一时点双发
-     （以 `final_source` 记录最后来源；冲突时以账本原序先到者为准，后到者降级为非 final）。
+  a. 一旦某任务发生过 final，后续**相邻同值**裁定不重复发布（`verdicts_emitted`
+     尾部去重——隔位回归值不误伤，durability
+     `test_verdict_order_and_repeated_values_across_restart` 要求
+     `['通过','不通过','通过']` 全部以 final 发布）；
+  b. **终态 final 单源（N2 限定版）**：对**同一终态时点**（同一 completed TASK_EVENT
+     或同一终态 TASK_STATE 对应的账本位置），事件路径 final 与 synth 路径 final
+     至多发布一条 final；冲突时以账本原序先到者为准，后到者降级为非 final 并记
+     `final_source`。**裁定 update 的 final 不参与本条降级**，其发布遵循账本原序
+     与 INV-4a。
 
 ### INV-5 重复与损坏 → 审计
 重复 seq、非法 seq、非法裁定：产生 bridge_error（带 uai/seq/uai/kind），
@@ -113,6 +121,9 @@ durability 权威语义），但必须满足：
 
 ## 4 处理循环（伪代码，唯一路由）
 
+定义 `resolved(tid)`：`not state.tasks[tid].waiting_result
+or state.tasks[tid].result_pointer is not null`。
+
 ```
 process(batch):                       # batch = 账本新记录，按偏移序
   for rec in batch:
@@ -120,6 +131,7 @@ process(batch):                       # batch = 账本新记录，按偏移序
     if rec is TASK_EVENT:
       if invalid_seq:      emit bridge_error(INV-5); continue
       if duplicate_seq:    emit bridge_error(INV-5); continue
+      if kind == result_ready and has_pointer: resolve(tid)   # 事件自带指针也解除挂起
       if kind == result_ready and no_pointer:
           state.tasks[tid].waiting_result = true
           continue                        # 记录已入账本序，只是不发布（INV-3）
@@ -129,11 +141,14 @@ process(batch):                       # batch = 账本新记录，按偏移序
       emit(ev)
     elif rec is VERDICT:
       if invalid:          emit bridge_error(INV-5); continue
-      if task.waiting_result: record only（发布等待解除，INV-3）
+      if task.waiting_result and not resolved(tid):
+          record only（发布等待解除后重放：按账本原序、按 INV-4 决定 final）
       elif same_as_last_emitted: skip
       else:               emit verdict update（INV-4 规则）
     elif rec is TASK_STATE:
-      if terminal and no event-path final yet:
+      if task.waiting_result and not resolved(tid):
+          record only（synth final 等解除后重放，INV-3 —— N3 守卫）
+      elif terminal and no event-path final at this terminal slot:
           emit synth final（INV-4）
       # 注意：不预取未来，不重排（INV-1）
 ```
@@ -156,6 +171,7 @@ process(batch):                       # batch = 账本新记录，按偏移序
 | write 前 | 无输出 | 无损 |
 | write 后、state 更新前 | outbox 有行、state 未提交 | 启动校验（INV-6）发现不一致 → 以 outbox 为准重放 state（事件已发布的事实优先），再继续 |
 | state 更新后 | 一致 | 无损 |
+| outbox 追加中途崩溃 | 尾部存在不完整 JSON 行 | 启动校验发现 → fail-closed（`incomplete_outbox_line`），要求人工修复；禁止静默丢弃或自动续写（N1） |
 
 INV-6 的 fail-closed 是人工修复入口，不是自动对齐。
 
@@ -163,9 +179,14 @@ INV-6 的 fail-closed 是人工修复入口，不是自动对齐。
 
 1. 三轮复核的**全部**反例（r1/r2/r3 原样保留为回归）；
 2. 组合矩阵：{result_ready 缺席指针}×{completed/failed/cancelled}×{0/1/N 条裁定}
-   ×{同批/跨批}×{重启}×{flush}，全部组合断言：无丢、无重、序正确；
+   ×{同批/跨批}×{重启}×{flush}×**{≥2 任务交错}**（r2/r3 的 P1 反例均依赖交错），
+   全部组合断言：无丢、无重、序正确；
 3. 崩溃注入：write 后 state 更新前 kill（TMP 文件模拟），重启后 INV-6 行为正确；
-4. 长账本增量（真账本 2,116 条）投影与 v1 产出比对（允许顺序修正的差异逐条列出）。
+4. 长账本增量（真账本 2,116 条）投影与 v1 产出比对（允许顺序修正的差异逐条列出）；
+5. **撕裂行重启**（N1）：outbox 半行 → fail-closed；
+6. **flush 后真指针到达**：INV-8 补发不产生重复 artifact；
+7. **INV-6 不一致负路径**：人为破坏三元组一致性 → fail-closed 拒绝处理新记录，
+   而非自动对齐。
 
 ## 8 迁移与门禁
 
@@ -175,12 +196,12 @@ INV-6 的 fail-closed 是人工修复入口，不是自动对齐。
 
 ---
 
-## 9 裁决请求
+## 9 核验记录
 
-请核验席审读本规格（特别是 §3 不变量与 §4 循环）：
-1. 不变量是否完备（有无遗漏的时序/崩溃组合）；
-2. INV-3 的"挂起发布不挂起处理"是否与 durability 权威语义兼容；
-3. INV-4b 的"后到降级"是否符合裁定权威语义；
-4. §7 测试矩阵是否足以支撑解除"不判交付"。
-
-核验通过后按 §4 实现（预计 v2 实现约 300–400 行，含测试矩阵生成器）。
+**SPEC_PASS_WITH_NOTES**（`RE-spec-reviewer-evbridge-v2-20261113.md`，E2 静态审读）。
+七类历史反例在不变量层面全部锁死；三处文字缺口 N1（§6 撕裂行恢复行）、
+N2（INV-4b 限定"同一终态时点"，裁定 update final 不参与降级）、N3（§4 TASK_STATE
+挂起守卫）与 §4 四点修正（resolved 定义、事件自带指针解除挂起、VERDICT record-only
+重放措辞、TASK_STATE 守卫）**已全部并入本 v2**。
+实现授权：**已获**（条件=按本 v2 实现 + §7 矩阵含 4 项补充全绿 + 三轮反例回归全绿 +
+门禁保持）。
