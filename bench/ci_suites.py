@@ -47,13 +47,15 @@ SUITES: list[tuple[str, list[str], str]] = [
     ("stage2", ["check-cross-repo-vocab.py"], "cross-repo-vocab"),
     ("bench", ["run_benchmark.py", "--self-check"], "bench-baseline"),
     ("bench", ["test_rerun_compare.py"], "bench-rerun-compare"),
+    ("bench", ["test_lab_gate.py"], "bench-lab-gate"),
     ("bench/controlled_experiment", ["test_controlled.py"], "bench-controlled-experiment"),
 ]
 
-# 需要真实 lab（nats broker + hub 进程）的套件：CI 的干净 runner 里没有，
-# 缺环境时记为 skipped 并写明原因，绝不伪装成 PASS。
+# 需要真实 lab（nats broker + hub 进程）的套件。
+# 只要 NATS_URL 指向一个活着的 lab，就必须**真跑**——CI 里由 bench/lab.py 先把 lab 拉起来。
+# 确实没有 lab 时才记 skipped 并写明原因，绝不伪装成 PASS。
 REQUIRES_LAB: dict[str, tuple[str, str]] = {
-    "stage2-test_a02_inbound": ("NATS_URL", "requires_lab_nats_and_hub"),
+    "stage2-test_a02_inbound": ("NATS_URL", "requires_lab_nats_and_hub_set_NATS_URL"),
 }
 
 
@@ -64,10 +66,10 @@ def _has_runtime_binary() -> bool:
     return any(shutil.which(x) for x in ("dsh", "codex", "codex.exe", "dsh.exe"))
 
 
-# 前置条件不是环境变量而是「机器上得真有这个东西」
-PREREQ: dict[str, tuple[object, str]] = {
-    "stage2-test_a05_second_runtime": (_has_runtime_binary, "requires_real_runtime_binary"),
-}
+# 前置条件不是环境变量而是「机器上得真有这个东西」。
+# 注意 A-05 不在此表里：它的解析层与失败层不依赖任何二进制，必须真跑；
+# 只有「真实调用」那一层在缺 runtime 时由测试自己记 SKIP（见该文件的 §3）。
+PREREQ: dict[str, tuple[object, str]] = {}
 
 # 只保留语义行：PASS/FAIL 名称与计数
 SIGNAL_RE = re.compile(r"^(PASS|FAIL)\b|^RESULT:|^[A-Za-z0-9_.-]+:\s*(PASS|FAIL)\b|^ok\b|^not ok\b|^[0-9]+/[0-9]+")

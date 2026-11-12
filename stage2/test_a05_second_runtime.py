@@ -58,7 +58,11 @@ def main() -> int:
           "missing_instruction" in (r.stdout + r.stderr), "")
 
     # ---------- 3. 契约层（需真 runtime） ----------
-    if not os.environ.get("DEEPSEEK_API_KEY"):
+    # 解析层与失败层不依赖任何外部二进制，必须永远真跑；
+    # 只有这一层需要 dsh 与凭据，缺任一项才记 SKIP（写明缺哪个）。
+    if not dsh_adapter.find_dsh():
+        skip("E-05 dsh 真实调用回传标记", "未找到 dsh 可执行文件（DSH_EXECUTABLE/PATH/LOCALAPPDATA）")
+    elif not os.environ.get("DEEPSEEK_API_KEY"):
         skip("E-05 dsh 真实调用回传标记", "未设置 DEEPSEEK_API_KEY")
     else:
         wd3 = tempfile.mkdtemp(prefix="dsh-adapter-")

@@ -117,19 +117,35 @@ python manifest.py --verify MANIFEST.json   # 不一致即 rc=2，拒跑
 
 ## 6 独立复跑门（E-04）
 
-`ci_suites.py` 把 19 个套件跑成一份**语义清单**（只留 PASS/FAIL 判据名 + 退出码，
+`ci_suites.py` 把 20 个套件跑成一份**语义清单**（只留 PASS/FAIL 判据名 + 退出码，
 剔除 pid/耗时/临时路径），`compare_reruns.py` 判定两份清单是否逐套件等价。
 `.github/workflows/independent-verification.yml` 用两台独立 runner 各跑一次再比对。
 
 ```bash
+python bench/lab.py start --base prototype     # 跨平台起 nats+hub（CI 也用这个）
+export NATS_URL=...                            # 从 bench/.lab-pids.json 取
 python bench/ci_suites.py --out rerun-A.json
 python bench/ci_suites.py --out rerun-B.json
 python bench/compare_reruns.py rerun-A.json rerun-B.json   # divergent 即非 0
 python bench/test_rerun_compare.py                          # 比对器自检 7/7
+python bench/test_lab_gate.py                               # 编排门自检 10/10
+python bench/lab.py stop
 ```
 
 边界（写在 workflow 里也写在这里）：同库同测在两台干净 runner 上复跑属于
-**体系内互检（E2）**，不等于外部第三方独立验证。缺 lab 或运行时的套件记为
-`skipped` 并写明原因（`requires_lab_nats_and_hub` / `requires_real_runtime_binary`），
+**体系内互检（E2）**，不等于外部第三方独立验证。
+
+### 端到端套件必须真跑，不许退回 SKIP
+
+A-02（A2A 请求 → 信封 → 中枢受理 → 账本）此前在 CI 里长期 SKIP——**等于「跨厂商协作闭环」
+这条主线在 CI 里从未被验证过**。现在：
+
+* `bench/lab.py` 是跨平台启停脚本（标准库 only），CI 里先 `start` 再跑套件；
+* workflow 的 compare job 里有一道硬门：`stage2-test_a02_inbound` 若 `skipped` 即判红；
+* `bench/test_lab_gate.py` 守住这条门本身有牙（缺 nats-server / base 不合法 / 端口被占
+  三种情况都必须明确失败，且显式 `--nats-server` 指向不存在的路径时**不许静默回退**）。
+
+确实没有 lab 时仍记 `skipped` 并写明原因（`requires_lab_nats_and_hub_set_NATS_URL`），
 不伪装成 PASS，也不当成用例失败。
+
 

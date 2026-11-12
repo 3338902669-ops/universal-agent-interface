@@ -27,8 +27,26 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r protocol/tests/conformance/requirements.txt
           python -m pip install nats-py
-      - name: Run all suites
-        run: python bench/ci_suites.py --out rerun-A.json
+      # A-02 是端到端套件，必须有真 nats+hub。以前它在 CI 里只能 SKIP，
+      # 于是「跨厂商协作闭环」这条主线在 CI 里其实从未被验证过。
+      - name: Install nats-server
+        run: |
+          curl -fsSL -o nats.tar.gz \
+            https://github.com/nats-io/nats-server/releases/download/v2.10.22/nats-server-v2.10.22-linux-amd64.tar.gz
+          tar -xzf nats.tar.gz
+          sudo install -m 0755 nats-server-v2.10.22-linux-amd64/nats-server /usr/local/bin/nats-server
+          nats-server --version
+      - name: Start lab and run all suites
+        env:
+          UAI_A2A_PROTO: ${{ github.workspace }}/a2a-official-spec/a2a.proto
+        run: |
+          python bench/lab.py start --base prototype
+          export NATS_URL="$(python -c "import json;print(json.load(open('bench/.lab-pids.json'))['nats_url'])")"
+          echo "lab at $NATS_URL"
+          python bench/ci_suites.py --out rerun-A.json
+      - name: Stop lab
+        if: always()
+        run: python bench/lab.py stop || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -48,8 +66,24 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r protocol/tests/conformance/requirements.txt
           python -m pip install nats-py
-      - name: Run all suites
-        run: python bench/ci_suites.py --out rerun-B.json
+      - name: Install nats-server
+        run: |
+          curl -fsSL -o nats.tar.gz \
+            https://github.com/nats-io/nats-server/releases/download/v2.10.22/nats-server-v2.10.22-linux-amd64.tar.gz
+          tar -xzf nats.tar.gz
+          sudo install -m 0755 nats-server-v2.10.22-linux-amd64/nats-server /usr/local/bin/nats-server
+          nats-server --version
+      - name: Start lab and run all suites
+        env:
+          UAI_A2A_PROTO: ${{ github.workspace }}/a2a-official-spec/a2a.proto
+        run: |
+          python bench/lab.py start --base prototype
+          export NATS_URL="$(python -c "import json;print(json.load(open('bench/.lab-pids.json'))['nats_url'])")"
+          echo "lab at $NATS_URL"
+          python bench/ci_suites.py --out rerun-B.json
+      - name: Stop lab
+        if: always()
+        run: python bench/lab.py stop || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -80,6 +114,21 @@ jobs:
               if d.get("failed"):
                   print(p, "had failing suites:", d["failed"]); sys.exit(1)
           print("both reruns internally green")
+          PY
+      - name: Require the end-to-end suite to have really run
+        run: |
+          python - <<'PY'
+          import json, sys
+          # A-02 曾经在 CI 里长期 SKIP。加这道门，防止它悄悄退回「不跑也不报」。
+          for p in ("rerun-A.json", "rerun-B.json"):
+              d = json.load(open(p, encoding="utf-8"))
+              names = {r["name"]: r for r in d.get("suites", [])}
+              row = names.get("stage2-test_a02_inbound")
+              if not row:
+                  print(p, "missing stage2-test_a02_inbound"); sys.exit(1)
+              if row.get("skipped"):
+                  print(p, "A-02 was skipped:", row.get("reason")); sys.exit(1)
+              print(p, "A-02 ran, exit=", row.get("exit"))
           PY
       - name: Compare semantic signals
         run: python bench/compare_reruns.py rerun-A.json rerun-B.json --out rerun-compare.json

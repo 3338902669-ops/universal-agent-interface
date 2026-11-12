@@ -80,15 +80,19 @@ def parse(argv: list[str]) -> tuple[str | None, str, str]:
 
 
 def main(argv: list[str]) -> int:
-    dsh = find_dsh()
-    if not dsh:
-        print(json.dumps({"type": "error", "message": "dsh_not_found"}), flush=True)
-        return 127
-
+    # 参数校验必须在依赖解析之前：missing_instruction 是纯解析错误，
+    # 不该因为「这台机器没装 dsh」而变成 dsh_not_found（127）。
+    # 首版先 find_dsh() 再 parse，导致干净 CI runner 上 CLI 契约测试必然失败——
+    # 那是把「环境缺失」错报成「参数契约不成立」。
     workdir, instruction, perm = parse(argv)
     if not instruction:
         print(json.dumps({"type": "error", "message": "missing_instruction"}), flush=True)
         return 2
+
+    dsh = find_dsh()
+    if not dsh:
+        print(json.dumps({"type": "error", "message": "dsh_not_found"}), flush=True)
+        return 127
 
     cmd = [dsh, "--profile", "headless", "--permission-mode", perm, instruction]
     try:
