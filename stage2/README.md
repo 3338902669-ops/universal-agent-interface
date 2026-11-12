@@ -1,4 +1,4 @@
-# Stage 2：A2A 边界投影层
+﻿# Stage 2：A2A 边界投影层
 
 在**不改动** `prototype/` 与 `adapters/` 的前提下，把内部账本投影成 A2A 对象、把 A2A 请求转成契约信封。
 
@@ -18,11 +18,11 @@
 | `identity.py` | LocalToken / OIDC / mTLS / Static 可插拔；无验证器不得升 `authenticated` | `test_identity.py` **10/10** |
 | `reassign.py` | 改派：围栏+1、attempt+1、必须带原因、终态不可改派 | `test_p1_batch.py` 中 A-11 共 12 条 |
 | `hub_singleton.py` | 中枢单实例：OS 文件锁 + 持有者校验 + 接管留痕 | `test_a09_singleton.py` **13/13** |
-| `ledger_chain.py` | 只追加账本哈希链：篡改/删链可检出 | `test_p2_batch.py` **24/24**（含 B-03/B-04） |
+| `ledger_chain.py` | 只追加账本哈希链：篡改/删链可检出 | `test_p2_batch.py` **32/32**（含 B-03/B-04） |
 | `inbound_bridge.py` | A2A 请求 → 信封 → `hub.submit` 闭环 | `test_a02_inbound.py` **8/8**（需真 lab） |
 | `check-cross-repo-vocab.py` | 跨仓词表一致性（读三仓真实文件） | **17 项 0 漂移** |
 
-合计 **251 条用例**（本地全绿，`test_a02_inbound.py` 需 nats+hub lab，CI 记显式 skip）。
+合计 **259 条用例**（本地全绿，`test_a02_inbound.py` 需 nats+hub lab，CI 记显式 skip）。
 协议侧另有 `../protocol/tests/conformance/` **22 项**；`../protocol/GAR-OPEN-ITEMS-REF.md` 记录了
 C-06~C-10 这些**必须由 GAR 侧闭合**的项及验收口径。
 
@@ -178,3 +178,4 @@ python check-cross-repo-vocab.py     # 0 = 一致，1 = 有漂移
 
 这是有意的：**宁可承认没验证，也不假装验证过**。接真 IdP 后把这两个分支换成真验签，`approver_authenticity`
 才允许变 `authenticated`。
+

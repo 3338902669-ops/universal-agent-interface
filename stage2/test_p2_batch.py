@@ -145,6 +145,37 @@ def main() -> int:
                                                         "false_complete", "timeout", "crash_window"},
               str(s["properties"]["kind"]["enum"]))
 
+    # ---------- B-03 驻留强制点（不只是字段） ----------
+    import unified as U
+
+    ok = U.validate_residency({"residency": {"store_in": ["CN"], "may_leave": False}}, ["CN"])
+    check("B-03 区域内落地放行", ok["allowed"] is True and ok["outside"] == [], "")
+
+    def expect_model(fn, name, needle):
+        try:
+            fn()
+        except U.ModelError as e:
+            check(name, needle in str(e), str(e)[:60])
+            return
+        check(name, False, "未抛错")
+
+    expect_model(lambda: U.validate_residency(
+        {"residency": {"store_in": ["CN"], "may_leave": False}}, ["CN", "US"]),
+        "B-03 越界写入被拒", "residency_violation")
+    expect_model(lambda: U.validate_residency({"residency": {"store_in": ["CN"]}}, ["US"]),
+        "B-03 may_leave 缺省按 false 处理", "residency_violation")
+    check("B-03 may_leave=true 时越界放行",
+          U.validate_residency({"residency": {"store_in": ["CN"], "may_leave": True}}, ["US"])["allowed"] is True)
+    expect_model(lambda: U.validate_residency({}, ["CN"]),
+        "B-03 未声明驻留按最严处理（strict）", "residency_undeclared")
+    check("B-03 非 strict 时未声明可放行并标记",
+          U.validate_residency({}, ["CN"], strict=False)["declared"] is False)
+    expect_model(lambda: U.validate_residency({"residency": {}}, ["CN"]),
+        "B-03 声明了但缺 store_in 被拒", "residency_missing_store_in")
+    audit = U.validate_residency({"residency": {"store_in": ["CN"], "may_leave": True, "retention_days": 0}}, ["US"])
+    check("B-03 审计对象带保留天数与越界清单",
+          audit["retention_days"] == 0 and audit["outside"] == ["US"], str(audit["outside"]))
+
     print("\nRESULT: %d/%d passed" % (len(PASSES), len(PASSES) + len(FAILS)))
     return 0 if not FAILS else 1
 

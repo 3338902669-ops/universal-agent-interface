@@ -344,3 +344,38 @@ def validate_independent_verification(record: dict, *, executor: str) -> dict:
     if verifier == executor:
         raise IndependenceError("verifier_must_not_be_implementer: %s" % verifier)
     return basis
+
+# ---------- B-03 落地：驻留声明的强制点 ----------
+def validate_residency(envelope: dict, actual_regions: list[str], *, strict: bool = True) -> dict:
+    """§13.3 的强制点：声明了 `may_leave=false` 就不许写到 `store_in` 之外。
+
+    失败语义（fail-closed）：
+      * 信封完全没写 `residency`：`strict=True` 时拒（未声明 ≠ 无限制），否则放行并标 `undeclared`；
+      * `may_leave` 缺省按 `false` 处理（与 schema 默认一致）；
+      * 实际落地区域（`actual_regions`）里出现 `store_in` 之外的值 → 拒。
+
+    返回审计对象（供写账本），违反即抛 ModelError（码 `residency_violation` / `residency_undeclared`）。
+    """
+    res = envelope.get("residency")
+    if res is None:
+        if strict:
+            raise ModelError("residency_undeclared")
+        return {"declared": False, "allowed": True, "store_in": [], "actual": list(actual_regions)}
+    if not isinstance(res, dict):
+        raise ModelError("residency_malformed")
+    store_in = [r for r in (res.get("store_in") or [])]
+    may_leave = bool(res.get("may_leave", False))
+    if not store_in:
+        raise ModelError("residency_missing_store_in")
+    outside = [r for r in actual_regions if r not in store_in]
+    if outside and not may_leave:
+        raise ModelError("residency_violation: %s" % ",".join(sorted(set(outside))))
+    return {
+        "declared": True,
+        "allowed": True,
+        "store_in": store_in,
+        "actual": list(actual_regions),
+        "may_leave": may_leave,
+        "retention_days": res.get("retention_days"),
+        "outside": outside,
+    }
