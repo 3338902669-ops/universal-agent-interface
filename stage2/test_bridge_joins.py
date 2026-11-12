@@ -39,7 +39,7 @@ def w(tmp: Path, records: list[dict]) -> Path:
 
 
 def run(tmp: Path, outbox: Path) -> list[dict]:
-    b = event_bridge.EventBridge(tmp, outbox)
+    b = event_bridge.EventBridge(tmp, outbox, experimental_test_only=True)
     evs = b.drain()
     b.write(evs)
     b.close()
@@ -195,7 +195,7 @@ def main() -> int:
         {"record": "VERDICT", "ts": "T2", "task_id": "k2", "verdict": "通过"},
     ])
     ob = tmp / "data" / "o.jsonl"
-    b = event_bridge.EventBridge(tmp, ob)
+    b = event_bridge.EventBridge(tmp, ob, experimental_test_only=True)
     b.write(b.drain())
     with pl.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"record": "VERDICT", "ts": "T9", "task_id": "k2",
@@ -249,7 +249,7 @@ def main() -> int:
     p = tmp / "data" / "ledger.jsonl"
     w(tmp, [{"record": "TASK_EVENT", "ts": "T1", "task_id": "q", "seq": 5, "kind": "completed"}])
     outbox = tmp / "data" / "o.jsonl"
-    b = event_bridge.EventBridge(tmp, outbox)
+    b = event_bridge.EventBridge(tmp, outbox, experimental_test_only=True)
     b.write(b.drain())
     with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"record": "TASK_STATE", "ts": "T2", "task_id": "q",
@@ -286,13 +286,13 @@ def main() -> int:
         {"record": "TASK_STATE", "ts": "T1", "task_id": "p1", "state": "SUCCEEDED"},
         {"record": "VERDICT", "ts": "T2", "task_id": "p1", "verdict": "通过"},
     ])
-    b1 = event_bridge.EventBridge(tmp, ob)
+    b1 = event_bridge.EventBridge(tmp, ob, experimental_test_only=True)
     b1.write(b1.drain())
     b1.close()                      # ← 丢弃实例，模拟 --once 的进程退出
     with pl.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"record": "VERDICT", "ts": "T9", "task_id": "p1",
                             "verdict": "不通过"}, ensure_ascii=False) + "\n")
-    b2 = event_bridge.EventBridge(tmp, ob)   # 新实例，从头重读
+    b2 = event_bridge.EventBridge(tmp, ob, experimental_test_only=True)   # 新实例，从头重读
     b2.write(b2.drain())
     b2.close()
     lines = [json.loads(l) for l in ob.read_text(encoding="utf-8").strip().split("\n")]

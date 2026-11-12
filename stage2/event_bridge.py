@@ -67,7 +67,9 @@ def _verdict_of_event(ev: dict) -> str | None:
 
 
 class EventBridge:
-    def __init__(self, base: Path, out_path: Path):
+    def __init__(self, base: Path, out_path: Path, *, experimental_test_only: bool = False):
+        if not experimental_test_only:
+            raise RuntimeError("event_bridge_disabled_pending_ordering_and_durability_repair")
         self.ledger = Path(base) / "data" / "ledger.jsonl"
         self.out = Path(out_path)
         self.offset = 0
