@@ -2,12 +2,16 @@
   "schema": "uai.bench.controlled_experiment.manifest/1",
   "files": {
     "fixtures/tasks.jsonl": {
-      "sha256": "0f40756d26345439617db0a7939890976ba644a4f59609a6e1e218a978b8778f",
-      "bytes": 998
+      "sha256": "92d84c9c32b07afa1ef5e5df78a7df0de7de233ffc488d06a118c1c50a47382c",
+      "bytes": 1022
     },
     "run.py": {
       "sha256": "001b9cc511abbae72ad3534de0191fe8abeea7300bd1af9f2ae68dfaa9e7b41e",
       "bytes": 5047
+    },
+    "run_pair.py": {
+      "sha256": "cf610d6b9cdef520b844d83bf73b8c6a0ae0ebe77af86c157548a3a97dabc14f",
+      "bytes": 5943
     },
     "analyze.py": {
       "sha256": "b62a2b6ca2814e8d88636f29987585d04aaf64d5ba6654a5ecb53fb60145d1fa",

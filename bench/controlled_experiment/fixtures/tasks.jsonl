@@ -1,6 +1,6 @@
 {"id": "T01", "timeout_s": 1200, "prompt": "输出恰好四个字符：PONG", "scoring": {"kind": "exact", "expect": "PONG"}}
 {"id": "T02", "timeout_s": 1200, "prompt": "计算 17 * 23，只输出数字", "scoring": {"kind": "numeric", "expect": 391, "tolerance": 0}}
 {"id": "T03", "timeout_s": 1200, "prompt": "把字符串 abcDEF 转成大写，只输出结果", "scoring": {"kind": "exact", "expect": "ABCDEF"}}
-{"id": "T04", "timeout_s": 1200, "prompt": "输出这行 JSON 的键名（只输出键名列表，逗号分隔，按字母序）：{\"beta\":1,\"alpha\":2,\"gamma\":3}", "scoring": {"kind": "exact", "expect": "alpha,beta,gamma"}}
+{"id": "T04", "timeout_s": 1200, "prompt": "输出这行 JSON 的键名（只输出键名列表，逗号分隔，逗号后不要空格，按字母序）：{\"beta\":1,\"alpha\":2,\"gamma\":3}", "scoring": {"kind": "exact", "expect": "alpha,beta,gamma"}}
 {"id": "T05", "timeout_s": 1200, "prompt": "回答：1 到 10 的整数里有几个质数？只输出数字", "scoring": {"kind": "numeric", "expect": 4, "tolerance": 0}}
 {"id": "T06", "timeout_s": 1200, "prompt": "输出匹配正则 ^[a-z]{3}\\d{2}$ 的一个示例，只输出该示例", "scoring": {"kind": "regex", "pattern": "^[a-z]{3}[0-9]{2}$"}}

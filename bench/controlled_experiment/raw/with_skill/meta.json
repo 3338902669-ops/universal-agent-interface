@@ -1,0 +1,16 @@
+{
+  "seat": "codex-cli",
+  "arm": "with_skill",
+  "cmd_template": "argv-list (no shell)",
+  "codex_home": "C:\\Users\\33389\\.codex",
+  "codex_version": "0.147.0",
+  "model": "deepseek-flash",
+  "model_provider": "deepseek",
+  "sandbox": "read-only",
+  "ephemeral": true,
+  "fixture_sha256": "92d84c9c32b07afa1ef5e5df78a7df0de7de233ffc488d06a118c1c50a47382c",
+  "scoring_frozen_sha256": "001b9cc511abbae72ad3534de0191fe8abeea7300bd1af9f2ae68dfaa9e7b41e",
+  "python": "3.12.10",
+  "started_at": 1794480293.4816325,
+  "tasks_total": 6
+}

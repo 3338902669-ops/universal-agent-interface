@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PINNED = ["fixtures/tasks.jsonl", "run.py", "analyze.py", "test_controlled.py"]
+PINNED = ["fixtures/tasks.jsonl", "run.py", "run_pair.py", "analyze.py", "test_controlled.py"]
 
 
 def sha256_file(path: Path) -> str:

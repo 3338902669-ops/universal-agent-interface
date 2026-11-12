@@ -23,5 +23,8 @@ rerun-*.json
 # lab 运行时 pid/端口（每次 start 重生）
 bench/.lab-pids.json
 
+# 受控实验的临时工作目录（题目在这里执行，每次重生）
+bench/controlled_experiment/raw/_work/
+
 # 与远端同步用的本地副本目录
 stage2-remote/
