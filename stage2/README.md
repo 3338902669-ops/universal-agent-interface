@@ -14,15 +14,15 @@
 | `a2a_server.py` | 只读 HTTP：`/.well-known/agent-card.json`、`/tasks`、`/tasks/<id>` | `test_a2a_server.py` **12/12** |
 | `inbound.py` | A2A 请求 → 契约 v1 信封（幂等键派生、附件指纹、凭据拦截） | `test_io.py` **27/27** |
 | `event_bridge.py` | 账本增量 → A2A 事件 → 只追加出站信箱 | `test_bridge_joins.py` **34/34** |
-| `unified.py` | 两轴状态 + 证据等级×载荷 + 审批校验（fail-closed） | `test_unified.py` **33/33** |
+| `unified.py` | 两轴状态 + 证据等级×载荷 + 审批校验 + **核验独立性（C-05）** + **证据只认账本（C-04）** | `test_unified.py` **33/33**、`test_p1_batch.py` 中 C-04/C-05 共 16 条 |
 | `identity.py` | LocalToken / OIDC / mTLS / Static 可插拔；无验证器不得升 `authenticated` | `test_identity.py` **10/10** |
-| `reassign.py` | 改派：围栏+1、attempt+1、必须带原因、终态不可改派 | `test_p1_batch.py` **18/18** |
+| `reassign.py` | 改派：围栏+1、attempt+1、必须带原因、终态不可改派 | `test_p1_batch.py` 中 A-11 共 12 条 |
 | `hub_singleton.py` | 中枢单实例：OS 文件锁 + 持有者校验 + 接管留痕 | `test_a09_singleton.py` **13/13** |
 | `ledger_chain.py` | 只追加账本哈希链：篡改/删链可检出 | `test_p2_batch.py` **24/24**（含 B-03/B-04） |
 | `inbound_bridge.py` | A2A 请求 → 信封 → `hub.submit` 闭环 | `test_a02_inbound.py` **8/8**（需真 lab） |
 | `check-cross-repo-vocab.py` | 跨仓词表一致性（读三仓真实文件） | **17 项 0 漂移** |
 
-合计 **235 条用例**（本地全绿，`test_a02_inbound.py` 需 nats+hub lab，CI 记显式 skip）。
+合计 **251 条用例**（本地全绿，`test_a02_inbound.py` 需 nats+hub lab，CI 记显式 skip）。
 协议侧另有 `../protocol/tests/conformance/` **22 项**；`../protocol/GAR-OPEN-ITEMS-REF.md` 记录了
 C-06~C-10 这些**必须由 GAR 侧闭合**的项及验收口径。
 

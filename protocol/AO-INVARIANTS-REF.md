@@ -52,6 +52,29 @@
 
 兄弟仓未克隆时该测试 SKIP 而不失败。
 
+## 6 V1 在 UAI 侧的强制点（C-05 补齐）
+
+「改成引用」不等于「没人管」。引用之后 UAI 仍需在自己的载体上**拒绝**违反 V1 的记录，
+这一层由 `stage2/unified.py: validate_independent_verification()` 承担（测试 `test_p1_batch.py`）：
+
+| 规则 | 拒绝码 |
+|---|---|
+| `通过 / 带注通过 / 条件通过` 必须带 `basis.independent_verification` | `verdict_requires_independent_verification` |
+| `self_check: true` 不是独立核验 | `self_check_is_not_independent_verification` |
+| 核验者不得等于执行者（V1 本体） | `verifier_must_not_be_implementer` |
+| 核验必须写 `checked_at` | `independent_verification_missing_checked_at` |
+| `未核` 必须写负责人 + 最小动作 + 绝对时限 | `unverified_missing_completion_plan` |
+
+`不通过 / 作废` 允许执行者自判——失败判定不需要独立性，只有「通过类」声明需要。
+
+## 7 C-04 在 UAI 侧的处理（证据只认账本）
+
+F-GAR-01 记的是「账本与证据队列可能不一致」。UAI 的做法是把账本当**唯一源**：
+证据记录必须带 `ledger = {seq, record_sha256}`，`bind_evidence_to_ledger()` 校验行号存在且摘要
+与账本当前内容一致；`check_evidence_store()` 一次扫全库返回冲突清单，用于发现双写漂移。
+拒绝码：`evidence_missing_ledger_ref`、`evidence_ledger_ref_dangling`、
+`evidence_ledger_digest_mismatch`。
+
 ---
 
 版本：v1，2026-11-12

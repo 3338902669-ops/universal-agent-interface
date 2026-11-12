@@ -232,3 +232,115 @@ def validate_approval(envelope: dict, credential: dict | None, *, cls: str) -> N
     auth = credential.get("approver_authenticity", "asserted")
     if auth not in ("asserted", "authenticated"):
         raise ModelError("bad_approver_authenticity: %r" % (auth,))
+
+# ---------- C-04：账本是证据的唯一源 ----------
+class EvidenceSourceError(ModelError):
+    """证据没有挂在账本记录上，或挂的记录与账本不一致（双写漂移）。"""
+
+
+class IndependenceError(ModelError):
+    """声称的「独立核验」并不独立（C-05 / AO V1）。"""
+
+
+# 这三个裁定值等于对外声明「已被独立核验过」
+REQUIRES_INDEPENDENT_VERIFICATION = ("通过", "带注通过", "条件通过")
+
+
+def ledger_record_digest(record: dict) -> str:
+    """账本记录的规范化摘要；与 ledger_chain.canonical 同一口径（排除两个链字段）。"""
+    import ledger_chain as LC  # 同一口径，避免两套 canonical 漂移
+
+    return hashlib.sha256(LC.canonical(record).encode("utf-8")).hexdigest()
+
+
+def bind_evidence_to_ledger(evidence: dict, ledger_rows: list[dict]) -> dict:
+    """C-04：证据必须引用账本里的某一行，且摘要对得上。
+
+    `evidence["ledger"] = {"seq": <0 基行号>, "record_sha256": <64 hex>}`。
+    行号按账本文件顺序（与 `ledger_chain.iter_records` 一致）。
+
+    拒绝三种情况：
+      * 没有 ledger 引用          → evidence_missing_ledger_ref（不允许「无主证据」）
+      * 行号越界                  → evidence_ledger_ref_dangling
+      * 摘要不匹配                → evidence_ledger_digest_mismatch（账本被改，或证据来自旁路存储）
+
+    返回带 `bound` 的新 dict，**不修改入参**。
+    """
+    if not isinstance(evidence, dict):
+        raise EvidenceSourceError("evidence_must_be_object")
+    ref = evidence.get("ledger")
+    if not isinstance(ref, dict):
+        raise EvidenceSourceError("evidence_missing_ledger_ref")
+    seq = ref.get("seq")
+    digest = ref.get("record_sha256")
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+        raise EvidenceSourceError("evidence_ledger_seq_invalid: %r" % (seq,))
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise EvidenceSourceError("evidence_ledger_digest_invalid: %r" % (digest,))
+    if seq >= len(ledger_rows):
+        raise EvidenceSourceError("evidence_ledger_ref_dangling: seq=%d rows=%d"
+                                  % (seq, len(ledger_rows)))
+    actual = ledger_record_digest(ledger_rows[seq])
+    if actual != digest:
+        raise EvidenceSourceError("evidence_ledger_digest_mismatch: %s != %s"
+                                  % (digest[:16], actual[:16]))
+
+    out = dict(evidence)
+    out["bound"] = {"seq": seq, "record_sha256": actual, "verified": True}
+    return out
+
+
+def check_evidence_store(evidences: list[dict], ledger_rows: list[dict]) -> dict:
+    """C-04：一次性检查一整个证据存储，返回冲突清单而不是抛第一个错。
+
+    用途是发现「账本改了但证据队列没跟着改」（或反过来）的双写漂移。
+    """
+    conflicts = []
+    for i, ev in enumerate(evidences):
+        try:
+            bind_evidence_to_ledger(ev, ledger_rows)
+        except EvidenceSourceError as e:
+            conflicts.append({"index": i, "evidence_id": (ev or {}).get("evidence_id"), "reason": str(e)})
+    return {"ok": not conflicts, "checked": len(evidences), "conflicts": conflicts}
+
+
+# ---------- C-05：核验者不得是实现者（AO V1） ----------
+def validate_independent_verification(record: dict, *, executor: str) -> dict:
+    """C-05：`通过 / 带注通过 / 条件通过` 必须带**独立**核验，且核验者≠执行者。
+
+    规则（fail-closed）：
+      1. 裁定值必须是 canonical 可写值；
+      2. 上述三个值要求 `basis.independent_verification` 存在；
+      3. 该对象必须写出 `verifier`、`checked_at`，且 `self_check` 不得为 True
+         —— 自检不是核验，写 `self_check: true` 就是自认没有独立核验；
+      4. `verifier` 不得等于 `executor`（AO V1：L2/L3 的核验者不得是实现者）；
+      5. `不通过 / 作废` 允许执行者自判（失败判定不需要独立性）；
+      6. `未核` 必须同时写负责人、最小补齐动作、绝对时限（契约 §10）。
+
+    返回 basis（便于调用方复用），违反即抛 IndependenceError。
+    """
+    verdict = assert_writable_verdict(record.get("verdict"))
+    basis = record.get("basis") or {}
+
+    if verdict == "未核":
+        missing = [k for k in ("owner", "min_action", "due_at") if not basis.get(k)]
+        if missing:
+            raise IndependenceError("unverified_missing_completion_plan: %s" % ",".join(missing))
+        return basis
+
+    if verdict not in REQUIRES_INDEPENDENT_VERIFICATION:
+        return basis
+
+    iv = basis.get("independent_verification")
+    if not isinstance(iv, dict):
+        raise IndependenceError("verdict_requires_independent_verification: %s" % verdict)
+    if iv.get("self_check") is True:
+        raise IndependenceError("self_check_is_not_independent_verification")
+    verifier = iv.get("verifier")
+    if not verifier:
+        raise IndependenceError("independent_verification_missing_verifier")
+    if not iv.get("checked_at"):
+        raise IndependenceError("independent_verification_missing_checked_at")
+    if verifier == executor:
+        raise IndependenceError("verifier_must_not_be_implementer: %s" % verifier)
+    return basis

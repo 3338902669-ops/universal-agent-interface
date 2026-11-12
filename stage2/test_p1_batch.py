@@ -89,6 +89,71 @@ def main() -> int:
     expect(lambda: R.reassign(lease, to_interface="tianshu", reason="x", execution_state="SUCCEEDED"),
            "A-11 终态任务不可改派", "terminal")
 
+    # ---------- C-05 核验者不得是实现者（AO V1） ----------
+    def verdict_record(value, executor="dsh", verifier="tianshu", self_check=False, checked_at="2026-11-12T07:00:00Z"):
+        iv = {"verifier": verifier, "self_check": self_check, "checked_at": checked_at}
+        return {"task_id": "t-c05", "verdict": value, "decided_by_role": executor,
+                "basis": {"independent_verification": iv}}
+
+    U.validate_independent_verification(verdict_record("通过"), executor="dsh")
+    check("C-05 独立核验者存在时「通过」成立", True)
+
+    expect(lambda: U.validate_independent_verification({"verdict": "通过", "basis": {}}, executor="dsh"),
+           "C-05 「通过」无独立核验被拒", "verdict_requires_independent_verification")
+    expect(lambda: U.validate_independent_verification(
+               verdict_record("通过", self_check=True), executor="dsh"),
+           "C-05 self_check 不算独立核验", "self_check_is_not_independent_verification")
+    expect(lambda: U.validate_independent_verification(
+               verdict_record("通过", verifier="dsh"), executor="dsh"),
+           "C-05 核验者=实现者被拒", "verifier_must_not_be_implementer")
+    expect(lambda: U.validate_independent_verification(
+               verdict_record("通过", checked_at=None), executor="dsh"),
+           "C-05 缺核验时间被拒", "missing_checked_at")
+    expect(lambda: U.validate_independent_verification(
+               {"verdict": "未核", "basis": {"owner": "dsh"}}, executor="dsh"),
+           "C-05 「未核」缺补齐计划被拒", "unverified_missing_completion_plan")
+    expect(lambda: U.validate_independent_verification(
+               {"verdict": "驳回", "basis": {}}, executor="dsh"),
+           "C-05 历史别名不可写入", "驳回")
+
+    U.validate_independent_verification({"verdict": "不通过", "basis": {}}, executor="dsh")
+    check("C-05 「不通过」允许执行者自判（失败判定不需独立性）", True)
+    U.validate_independent_verification(
+        {"verdict": "未核", "basis": {"owner": "dsh", "min_action": "重跑一遍", "due_at": "2026-11-13T00:00:00Z"}},
+        executor="dsh")
+    check("C-05 「未核」三项齐全时成立", True)
+
+    # ---------- C-04 账本是证据的唯一源 ----------
+    import ledger_chain as LC
+
+    rows = [{"record": "TASK_STATE", "task_id": "t1", "state": "QUEUED"},
+            {"record": "VERDICT", "task_id": "t1", "verdict": "通过"}]
+    rows = [LC.seal(rows[0], LC.GENESIS), LC.seal(rows[1], LC.GENESIS[:0] or LC.GENESIS)]
+    good = {"evidence_id": "e1", "grade": "E1",
+            "ledger": {"seq": 1, "record_sha256": U.ledger_record_digest(rows[1])}}
+    before = dict(good)
+    bound = U.bind_evidence_to_ledger(good, rows)
+    check("C-04 证据挂到账本行上", bound["bound"]["verified"] is True and bound["bound"]["seq"] == 1,
+          str(bound["bound"]["seq"]))
+    check("C-04 不修改入参", good == before and "bound" not in good, str(list(good)))
+
+    expect(lambda: U.bind_evidence_to_ledger({"evidence_id": "e2"}, rows),
+           "C-04 无账本引用的证据被拒", "evidence_missing_ledger_ref")
+    expect(lambda: U.bind_evidence_to_ledger(
+               {"evidence_id": "e3", "ledger": {"seq": 9, "record_sha256": "a" * 64}}, rows),
+           "C-04 行号越界被拒", "evidence_ledger_ref_dangling")
+    expect(lambda: U.bind_evidence_to_ledger(
+               {"evidence_id": "e4", "ledger": {"seq": 1, "record_sha256": "b" * 64}}, rows),
+           "C-04 摘要不匹配被拒（双写漂移）", "evidence_ledger_digest_mismatch")
+
+    store = [good, {"evidence_id": "e5", "ledger": {"seq": 1, "record_sha256": "c" * 64}}]
+    report = U.check_evidence_store(store, rows)
+    check("C-04 整库检查报冲突而非抛第一个错",
+          report["ok"] is False and report["checked"] == 2 and len(report["conflicts"]) == 1,
+          "%d conflicts" % len(report["conflicts"]))
+    check("C-04 冲突里带证据 id 便于定位", report["conflicts"][0]["evidence_id"] == "e5",
+          str(report["conflicts"][0]["reason"])[:40])
+
     print("\nRESULT: %d/%d passed" % (len(PASSES), len(PASSES) + len(FAILS)))
     return 0 if not FAILS else 1
 
