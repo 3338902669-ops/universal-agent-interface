@@ -51,6 +51,11 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(summary['pairing']['n_paired'], 0)
         self.assertEqual(summary['pairing']['coverage'], 0)
 
+    def test_modified_scorer_snapshot_rejected(self):
+        (self.raw / 'scoring.frozen.py').write_text('# tampered', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'snapshot hash mismatch'):
+            analyze.summarize(self.raw)
+
     def test_missing_freeze_rejected(self):
         (self.raw / 'freeze.json').unlink()
         with self.assertRaises(ValueError):

@@ -246,6 +246,7 @@ def run(args: argparse.Namespace) -> int:
     }
     # Preserve the exact task bytes used; a later checkout may change line endings.
     (out_dir / "tasks.frozen.jsonl").write_bytes(task_bytes)
+    (out_dir / "scoring.frozen.py").write_bytes((HERE / "scoring.py").read_bytes())
     write_json(out_dir / "freeze.json", freeze)
 
     trials = []

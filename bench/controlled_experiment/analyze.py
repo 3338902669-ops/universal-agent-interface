@@ -96,6 +96,13 @@ def summarize(raw: Path) -> dict[str, Any]:
         # exact bytes (or LF-normalized checkout) match the recorded digest.
         tasks_path = HERE / "fixtures" / "tasks.jsonl"
     scoring_path = HERE / "scoring.py"
+    archived_scoring = raw / "scoring.frozen.py"
+    if archived_scoring.is_file():
+        archived_hash = hashlib.sha256(archived_scoring.read_bytes()).hexdigest()
+        if freeze.get("scoring_sha256") != archived_hash:
+            raise ValueError("frozen scoring snapshot hash mismatch")
+    # Only the currently imported scorer is executed, after its own hash check.
+    # Never execute Python code from an untrusted archive.
     for key, path in (("tasks_sha256", tasks_path), ("scoring_sha256", scoring_path)):
         data = path.read_bytes()
         digests = {hashlib.sha256(data).hexdigest()}
