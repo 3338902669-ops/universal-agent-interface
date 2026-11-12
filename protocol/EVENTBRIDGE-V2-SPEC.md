@@ -1,8 +1,11 @@
 # EventBridge v2 重写规格：不变量先行（2026-11-13）
 
-状态：**设计稿 v2（已并入规格核验修订 N1–N3 与 §4 四点修正），实现已授权**。
+状态：**v2 修订稿已实现（commit f81b48d + b7368ad），最终核验 PASS，用户已裁决解除"不判交付"（2026-11-13）**。
 核验：`RE-spec-reviewer-evbridge-v2-20261113.md` 判定 SPEC_PASS_WITH_NOTES；
 本 v2 即修订稿，核验条件（N1/N2/N3 + §4 四点）已全部并入，无未决项。
+最终验收证据：`~/.shared/cloud-outbox/EVENTBRIDGE-V2-FINAL-EVIDENCE-20261113.md`
+（verify-A 五套件退出码全 0 + 双文件门禁确认；verify-B 三反例 PASS，反例3 经
+b7368ad defer_final 修复后原脚本复验 PASS）。
 背景：三轮独立复核（RE-tianshu-event-bridge-verify + RE-agent15 r1/r2/r3）证明现有桥的
 缺陷是结构性的——两个互相冲突的生命周期路径（drain 的等待守卫 vs flush 的绕过路由），
 加上从 outbox 回读重建的跨崩溃状态，无法靠补丁收敛。
@@ -205,3 +208,19 @@ N2（INV-4b 限定"同一终态时点"，裁定 update final 不参与降级）�
 重放措辞、TASK_STATE 守卫）**已全部并入本 v2**。
 实现授权：**已获**（条件=按本 v2 实现 + §7 矩阵含 4 项补充全绿 + 三轮反例回归全绿 +
 门禁保持）。
+
+**最终核验（2026-11-13，双独立席）：PASS。**
+- verify-A（`~/.shared/cloud-outbox/RE-verifyA-suites-20261113.md`）：五套件退出码全 0
+  （durability 18、v2 验收 15、joins 36、io 27、probes 7）；双文件生产门禁确认保持。
+- verify-B（`RE-verifyB-examples-20261113.md` + 复验 `RE-verifyB2-case3-replay-20261113.md`）：
+  三定向反例——反例1（r3① force 后指针到账 artifact 不丢）PASS、
+  反例2（r2 交错任务 progress 不丢 + 两终态）PASS、
+  反例3 首测 FAIL（flush 中 VERDICT update final=True 致 final 3 条≠1）→
+  b7368ad 恢复 v1 defer_final 语义 → 原脚本复验 **PASS**（3 行：VERDICT 通过/不通过
+  final=false + synth 唯一 final 携带最终裁定，repo HEAD=b7368ad clean）。
+- 三轮历史 FAIL 的 8 个缺陷项全部闭环，逐项对照见
+  `~/.shared/cloud-outbox/EVENTBRIDGE-V2-FINAL-EVIDENCE-20261113.md`。
+
+**用户裁决（2026-11-13）：解除"不判交付"。** v2（event_bridge_v2.py）转为已核验交付状态；
+`experimental_test_only` 门禁在 v1/v2 均保持——生产启用（移除门禁、接入真实消费方）
+属单独决策。v1（event_bridge.py）维持禁用不变，仅作参考实现保留。
