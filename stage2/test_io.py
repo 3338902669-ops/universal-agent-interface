@@ -1,4 +1,4 @@
-"""Stage 2 入站/出站自检：inbound.py + event_bridge.py。
+﻿"""Stage 2 入站/出站自检：inbound.py + event_bridge.py。
 
 跑法：python test_io.py ；退出码 0 = 全通过。
 """
@@ -143,7 +143,7 @@ def test_bridge():
     ledger.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n",
                       encoding="utf-8")
 
-    bridge = event_bridge.EventBridge(tmp, outbox)
+    bridge = event_bridge.EventBridge(tmp, outbox, experimental_test_only=True)
     size_before = ledger.stat().st_size
     events = bridge.drain()
     bridge.write(events)

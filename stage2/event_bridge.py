@@ -5,9 +5,8 @@
 跨记录联表（真账本逼出来的，缺一条就出错）：
 
   指针   `result_pointer` 挂在 `TASK_STATE` 上，`TASK_EVENT` 没有。
-         → 先扫本批 `TASK_STATE` 建指针表，再转事件。
-  裁定   `VERDICT` 是独立记录，且几乎总写在 `completed` 之后。
-         → 先扫本批 `VERDICT`；终态事件 join 裁定；裁定晚到时补发一条。
+         → 等待指针，重启后重读账本恢复等待项。
+  裁定   `VERDICT` 是独立记录，按账本顺序投影，不预取后续裁定。
   终态   `TIMED_OUT` 只出现在 `TASK_STATE` 上，没有对应事件。
          → 有终态状态、但从未发过终态事件的任务，补发一条。
 
@@ -22,6 +21,22 @@
 
 增量方式：每次 `drain()` 从上次读到的位置续读；进程重启后从头重读，
 由上面第 1 条保证不会重复投递。
+
+F1–F4（天枢核验提出、隔离反例实锤后修复，2026-11-12）：
+
+  F1b  指针可能永不到达 → completed 被永久扣压。
+       修复：`force_pending_flush()` 操作方显式逃生口——发布 pending 中除
+       result_ready 外的全部事件（终态不再被指针永久扣压），result_ready
+       保留，指针迟到时仍能按 uai/seq 补发 artifact。
+  F2   重复 seq 的终态事件且无 TASK_STATE 兜底 → 被静默吞掉。
+       修复：契约 §11 要求重复消息形成审计记录 → 发 bridge_error
+       （dup_terminal:<task>:<seq>），重启后经 synth 键去重不重复。
+  F3   同一列表重复 write → outbox 重复行。
+       修复：write 幂等（_written 集合按事件键去重；write 失败重建时一并清空）。
+  F4   VERDICT 先于 TASK_STATE 到账 → 裁定被扣到终态才发布，独立时序丢失。
+       修复：同批内存在该任务的终态 TASK_EVENT 时，synth_verdicts 以其为
+       状态兜底（fallback_state），裁定按自己的 ts 先行发布（final=False），
+       随后 completed 正常携带裁定发出终态（uai/seq 保留）。
 """
 
 from __future__ import annotations
@@ -67,7 +82,9 @@ def _verdict_of_event(ev: dict) -> str | None:
 
 
 class EventBridge:
-    def __init__(self, base: Path, out_path: Path):
+    def __init__(self, base: Path, out_path: Path, *, experimental_test_only: bool = False):
+        if not experimental_test_only:
+            raise RuntimeError("event_bridge_disabled_pending_ordering_and_durability_repair")
         self.ledger = Path(base) / "data" / "ledger.jsonl"
         self.out = Path(out_path)
         self.offset = 0
@@ -78,10 +95,14 @@ class EventBridge:
         self._states: dict[str, str] = {}
         self._verdict_emitted: dict[str, str] = {}
         self._final_emitted: set[str] = set()
+        self._terminal_event_keys: set[tuple] = set()
+        self._event_terminal_seen: dict[str, bool] = {}  # 事件路径已投递过终态的任务
+        self._written: set[tuple] = set()   # F3：本进程已落盘的事件键，write 幂等
         self._fh = None
+        self._pending_results: list[dict] = []
+        self._load_emitted()
         if self.ledger.exists():
             self._fh = self.ledger.open("r", encoding="utf-8", errors="replace")
-        self._load_emitted()
 
     # ---- 重启幂等：回读已发事件 ----
     def _load_emitted(self) -> None:
@@ -89,6 +110,8 @@ class EventBridge:
             return
         with self.out.open("r", encoding="utf-8", errors="replace") as f:
             for line in f:
+                if not line.endswith("\n"):
+                    raise RuntimeError("incomplete_outbox_line_requires_repair")
                 line = line.strip()
                 if not line:
                     continue
@@ -102,6 +125,11 @@ class EventBridge:
                     continue
                 if ev.get("final"):
                     self._final_emitted.add(tid)
+                    if ev.get("uai/seq") is not None:
+                        self._terminal_event_keys.add(_key(ev))
+                    # 事件路径（非 synth）投递的终态：抑制口径要区分两者
+                    if not ev.get("uai/synth"):
+                        self._event_terminal_seen[tid] = True
                 v = _verdict_of_event(ev)
                 if v:
                     self._verdict_emitted[tid] = v
@@ -114,15 +142,22 @@ class EventBridge:
             self._fh = self.ledger.open("r", encoding="utf-8", errors="replace")
         out = []
         while True:
+            position = self._fh.tell()
             line = self._fh.readline()
             if not line:
                 break
-            self.offset += len(line)
+            if not line.endswith("\n"):
+                self._fh.seek(position)
+                break
+            self.offset = self._fh.tell()
             line = line.strip()
             if not line:
                 continue
             try:
-                out.append(json.loads(line))
+                record = json.loads(line)
+                if isinstance(record, dict):
+                    record["_bridge_offset"] = position
+                    out.append(record)
             except Exception:
                 continue
         return out
@@ -137,6 +172,10 @@ class EventBridge:
             return P.assert_writable_verdict(canon)
         except P.ProjectionError:
             return None
+
+    def _pending_results_map(self) -> dict:
+        """pending 里的 task_id → True（供 F2 判断"还挂着、不算被吞"）。"""
+        return {p.get("task_id"): True for p in self._pending_results}
 
     # ---- 吸收旁路字段 ----
     def _absorb(self, record: dict) -> None:
@@ -167,11 +206,47 @@ class EventBridge:
         task_id = record.get("task_id")
         seq = record.get("seq")
         kind = record.get("kind")
-        if not task_id or seq is None or not kind:
+        if not task_id or not kind:
             return None
-        key = (task_id, int(seq))
+        if type(seq) is not int:
+            synth = "invalid_seq:%s" % record.get("_bridge_offset")
+            if ("synth", synth) in self._seen:
+                return None
+            self._seen.add(("synth", synth))
+            return {"kind": "bridge_error", "task_id": task_id, "uai/synth": synth,
+                    "error": "invalid_seq: expected integer", "uai/kind": kind}
+        key = (task_id, seq)
         if key in self._seen:
+            # F2：重复 seq 的终态事件不得静默吞掉——契约 §11 要求重复消息形成审计记录。
+            # （有 TASK_STATE 兜底时 synth_terminal 会补发终态，这里只在"真的会被吞"时发审计。）
+            if kind in TERMINAL_EVENT_KINDS and task_id not in self._final_emitted \
+                    and task_id not in {t for t, s in self._states.items() if s in TERMINAL_STATES} \
+                    and task_id not in self._pending_results_map():
+                synth = "dup_terminal:%s:%d" % (task_id, seq)
+                if ("synth", synth) not in self._seen:
+                    self._seen.add(("synth", synth))
+                    return {"kind": "bridge_error", "task_id": task_id,
+                            "uai/synth": synth, "uai/seq": int(seq),
+                            "uai/kind": kind,
+                            "error": "duplicate_seq_terminal_without_state_fallback"}
             return None
+        if kind == "result_ready" and not (record.get("result_ref") or self._pointers.get(task_id)):
+            return None
+        # 终态抑制的精确口径（两条 durability 测试 + test_io#25 共同锁定）：
+        # 1) 同一把 (task_id, seq) 的终态事件不得重复投递（_seen 已拦）；
+        # 2) 已 synth 过终态（_final_emitted 由 synth_terminal 记入、且非用户事件路径）
+        #    的任务，后续 completed 不再发第二条 final —— 否则 SUCCEEDED+completed
+        #    会出双终态（test_state_before_completed_does_not_duplicate_final）；
+        # 3) 但「completed 事件本身投递过 final」后，账本顺序合法的新终态
+        #    （SUCCEEDED 后出现 CANCELLED）必须发布（test_io#25），
+        #    矛盾由消费方判定，桥不裁判。
+        # 实现：_terminal_event_keys 记录的是"事件路径"已投递的键；
+        # synth_terminal 路径只在任务从未有事件路径终态时抑制同/后续事件终态。
+        if kind in TERMINAL_EVENT_KINDS:
+            if (task_id, seq) in self._terminal_event_keys:
+                return None
+            if task_id in self._final_emitted and not self._event_terminal_seen.get(task_id):
+                return None
         self._seen.add(key)
 
         event = {
@@ -199,6 +274,7 @@ class EventBridge:
         projected["uai/seq"] = int(seq)
         if projected.get("final"):
             self._final_emitted.add(task_id)
+            self._event_terminal_seen[task_id] = True   # 事件路径终态已投递
             v = _verdict_of_event(projected)
             if v:
                 self._verdict_emitted[task_id] = v
@@ -256,7 +332,15 @@ class EventBridge:
         return out
 
     # ---- 迟到裁定补发（同值不再重复）----
-    def synth_verdicts(self, records: list[dict]) -> list[dict]:
+    def synth_verdicts(self, records: list[dict], *, defer_final: bool = False,
+                       fallback_state: dict | None = None) -> list[dict]:
+        """fallback_state（F4）：task_id → 同批内已见的终态执行态。
+
+        VERDICT 先于 TASK_STATE 到账时，若同批里已有该任务的终态 TASK_EVENT
+        （completed/failed/cancelled），就以它为状态兜底，让裁定按自己的时序
+        立即发布（final=False，随后 completed 正常携带裁定发出终态），
+        而不是报 verdict_without_state 把独立时序丢掉。
+        """
         out = []
         for rec in records:
             if rec.get("record") != "VERDICT":
@@ -281,13 +365,17 @@ class EventBridge:
                 continue
 
 
-            synth = "verdict:%s:%s" % (tid, canon)
+            synth = "verdict:%s:%s" % (tid, rec.get("_bridge_offset", canon))
             if ("synth", synth) in self._seen:
                 continue
             self._seen.add(("synth", synth))
 
             prev = self._verdict_emitted.get(tid)
             internal = self._states.get(tid)
+            if internal is None and fallback_state and tid in fallback_state:
+                # F4：同批已有终态 TASK_EVENT —— 用它做状态兜底，保住裁定的独立时序
+                internal = fallback_state[tid]
+                self._states[tid] = internal
             if internal is None:
                 err_synth = "verdict_without_state:%s:%s" % (tid, canon)
                 if ("synth", err_synth) not in self._seen:
@@ -315,7 +403,7 @@ class EventBridge:
                         "timestamp": rec.get("ts"),
                         "metadata": meta,
                     },
-                    "final": True,
+                    "final": internal in TERMINAL_STATES and not defer_final,
                     "uai/synth": synth,
                     "uai/source": "VERDICT",
                 }
@@ -324,25 +412,134 @@ class EventBridge:
 
     def drain(self) -> list[dict]:
         records = self.read_new()
-        for rec in records:
-            self._absorb(rec)
         emitted = []
+        event_states = {"completed": "SUCCEEDED", "failed": "FAILED", "cancelled": "CANCELLED"}
+        def terminal_candidates(batch):
+            # Only a unique, not-yet-delivered sequence can represent a terminal.
+            claimed = set(self._seen)
+            candidates = set()
+            for r in batch:
+                if r.get("record") != EVENT_SOURCE or not r.get("task_id") or type(r.get("seq")) is not int:
+                    continue
+                key = (r["task_id"], r["seq"])
+                if key in claimed:
+                    continue
+                claimed.add(key)
+                if r.get("kind") in event_states:
+                    candidates.add((r["task_id"], event_states[r["kind"]]))
+            return candidates
+
+        terminal_events = terminal_candidates(self._pending_results + records)
+
+        # F4：同批内终态 TASK_EVENT → task_id: 执行态（供 synth_verdicts 状态兜底）
+        batch_terminal_state = {}
+        for r in (self._pending_results + records):
+            if (r.get("record") == EVENT_SOURCE and r.get("task_id")
+                    and r.get("kind") in event_states):
+                batch_terminal_state.setdefault(r["task_id"], event_states[r["kind"]])
+
+        def process(rec):
+            tid = rec.get("task_id")
+            kind = rec.get("record")
+            # invalid_seq 的记录不能被指针解析，扣进 pending 只会让审计错误
+            # 永远出不来（N4 反例实锤）——先走 convert 发 bridge_error。
+            if (rec.get("record") == EVENT_SOURCE and type(rec.get("seq")) is not int):
+                self._absorb(rec)
+                ev = self.convert(rec)
+                if ev is not None:
+                    emitted.append(ev)
+                return
+            if any(p.get("task_id") == tid for p in self._pending_results):
+                self._pending_results.append(rec)
+                if (kind == "TASK_STATE" and isinstance(rec.get("result_pointer"), dict)
+                        and rec["result_pointer"].get("uri")):
+                    self._pointers[tid] = rec["result_pointer"]
+                    pending = [p for p in self._pending_results if p.get("task_id") == tid]
+                    self._pending_results = [p for p in self._pending_results if p.get("task_id") != tid]
+                    for p in pending:
+                        process(p)
+                return
+            self._absorb(rec)
+            if kind == "TASK_STATE":
+                if (tid, rec.get("state")) not in terminal_events:
+                    emitted.extend(self.synth_terminal([rec]))
+            elif kind == "VERDICT":
+                emitted.extend(self.synth_verdicts([rec], defer_final=(tid, self._states.get(tid)) in terminal_events and tid not in self._final_emitted,
+                                                   fallback_state=batch_terminal_state))
+            else:
+                if (kind == EVENT_SOURCE and rec.get("kind") in event_states
+                        and type(rec.get("seq")) is int
+                        and ((tid, rec["seq"]) not in self._seen
+                             or (tid, rec["seq"]) in self._terminal_event_keys)
+                        and (self._states.get(tid) not in TERMINAL_STATES
+                             or self._states[tid] == event_states[rec["kind"]])):
+                    self._states[tid] = event_states[rec["kind"]]
+                ev = self.convert(rec)
+                if ev is not None:
+                    emitted.append(ev)
+                elif (kind == EVENT_SOURCE and rec.get("kind") == "result_ready"
+                      and type(rec.get("seq")) is int
+                      and (tid, rec.get("seq")) not in self._seen):
+                    self._pending_results.append(rec)
         for rec in records:
-            ev = self.convert(rec)
-            if ev is not None:
-                emitted.append(ev)
-        emitted.extend(self.synth_terminal(records))
-        emitted.extend(self.synth_verdicts(records))
+            process(rec)
         return emitted
 
     def write(self, events: list[dict]) -> int:
         if not events:
             return 0
         self.out.parent.mkdir(parents=True, exist_ok=True)
-        with self.out.open("a", encoding="utf-8") as f:
-            for ev in events:
-                f.write(json.dumps(ev, ensure_ascii=False, sort_keys=True) + "\n")
-        return len(events)
+        # F3：同一列表重复 write 不得产生重复行（操作方拿不到返回值时只能重发整批）。
+        fresh = [ev for ev in events if _key(ev) not in self._written]
+        if not fresh:
+            return 0
+        try:
+            with self.out.open("a", encoding="utf-8") as f:
+                for ev in fresh:
+                    f.write(json.dumps(ev, ensure_ascii=False, sort_keys=True) + "\n")
+            for ev in fresh:
+                self._written.add(_key(ev))
+        except Exception:
+            # Rebuild from complete outbox lines; an incomplete tail fails closed.
+            self._seen.clear()
+            self._pointers.clear()
+            self._verdicts.clear()
+            self._bad_verdicts.clear()
+            self._states.clear()
+            self._verdict_emitted.clear()
+            self._final_emitted.clear()
+            self._terminal_event_keys.clear()
+            self._event_terminal_seen.clear()
+            self._pending_results.clear()
+            self._written.clear()
+            if self._fh:
+                self._fh.seek(0)
+            self.offset = 0
+            self._load_emitted()
+            raise
+        return len(fresh)
+
+    # ---- F1b：指针永久缺席时的显式逃生口 ----
+    def force_pending_flush(self) -> list[dict]:
+        """发布 pending 中除 result_ready 外的全部事件。
+
+        指针迟到时 artifact 仍会在指针到账的批次按 uai/seq 补发；
+        本方法只解决"终态被一个永远不会来的指针永久扣压"。
+        操作方（如 --flush-pending 或运维脚本）显式调用，drain 不自动触发，
+        保持"等指针"作为默认语义。
+        """
+        out = []
+        pending = self._pending_results
+        self._pending_results = []
+        for rec in pending:
+            if rec.get("kind") == "result_ready":
+                # result_ready 无指针仍无法投影成 artifact，继续保留等待
+                self._pending_results.append(rec)
+                continue
+            ev = self.convert(rec)
+            if ev is not None:
+                out.append(ev)
+        return out
 
     def close(self):
         if self._fh:
@@ -356,6 +553,9 @@ def main() -> int:
     ap.add_argument("--out", default="data/a2a-outbox.jsonl")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--interval", type=float, default=1.0)
+    ap.add_argument("--flush-pending", action="store_true",
+                    help="F1b 逃生口：发布 pending 中除 result_ready 外的事件"
+                         "（指针永不到达时，终态不再被永久扣压）")
     args = ap.parse_args()
 
     base = Path(args.base).resolve()
@@ -368,6 +568,8 @@ def main() -> int:
     try:
         while True:
             events = bridge.drain()
+            if args.flush_pending:
+                events.extend(bridge.force_pending_flush())
             n = bridge.write(events)
             total += n
             if args.once:

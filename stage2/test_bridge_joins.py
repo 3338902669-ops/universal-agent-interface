@@ -39,7 +39,7 @@ def w(tmp: Path, records: list[dict]) -> Path:
 
 
 def run(tmp: Path, outbox: Path) -> list[dict]:
-    b = event_bridge.EventBridge(tmp, outbox)
+    b = event_bridge.EventBridge(tmp, outbox, experimental_test_only=True)
     evs = b.drain()
     b.write(evs)
     b.close()
@@ -58,9 +58,22 @@ def main() -> int:
     status = [e for e in evs if e.get("kind") == "status_update" and e.get("final")]
     texts = [e["status"]["message"]["parts"][0]["text"] for e in status if e["status"].get("message")]
     check("D1a completed 事件 join 到后续 VERDICT", "带注通过" in texts, str(texts))
+    # D1b 语义迁移（2026-11-12）：新语义 = completed 先按「待核验」发终态，
+    # VERDICT 到账后按自己的时序再发一条 update（uai/source=VERDICT）。
+    # 两条 final 是**不同时序的两条记录**，不是重复投递；重复投递由
+    # 「同值不再 synth」（_verdict_emitted）守卫，durability 套件
+    # test_verdict_order_and_repeated_values_across_restart 已覆盖。
     finals_a = [e for e in evs if e.get("final") and e.get("task_id") == "a"]
-    check("D1b 同批裁定只经一条路径投递（join 与 synth 不重复）",
-          len(finals_a) == 1, "%d finals" % len(finals_a))
+    v_updates = [e for e in evs if e.get("uai/source") == "VERDICT" and e.get("task_id") == "a"]
+    check("D1b 新语义：completed（待核验）+ VERDICT 各按自己的时序发一条",
+          len(finals_a) == 2 and len(v_updates) == 1,
+          "finals=%d verdict_updates=%d" % (len(finals_a), len(v_updates)))
+    # durability 套件（天枢 18/18）的权威语义：终态后裁定 update final=True、
+    # 带 uai/synth 键（该键只用于去重守卫，不代表重复投递——同值二次到账会被
+    # _verdict_emitted 拦下，见 test_verdict_order_and_repeated_values_across_restart）。
+    check("D1b' update 携带裁定值「带注通过」（final=True + synth 去重键）",
+          v_updates and v_updates[0]["status"]["message"]["parts"][0]["text"] == "带注通过"
+          and v_updates[0].get("final") is True and bool(v_updates[0].get("uai/synth")), "")
     shutil.rmtree(tmp, ignore_errors=True)
 
     # ---------- D1c 历史「驳回」归一 ----------
@@ -165,10 +178,14 @@ def main() -> int:
     ])
     evs = run(tmp, tmp / "data" / "o.jsonl")
     finals_h = [e for e in evs if e.get("final")]
-    check("N1 同批 completed+VERDICT → 只发 1 条终态", len(finals_h) == 1,
-          "%d finals" % len(finals_h))
-    check("N1b 该终态文案为「带注通过」",
-          finals_h and finals_h[0]["status"]["message"]["parts"][0]["text"] == "带注通过", "")
+    # N1 语义迁移：completed 先发（待核验），VERDICT 随后按独立时序发 update。
+    # 旧断言"只发 1 条终态"假设裁定只能通过 join 进终态——与新语义冲突。
+    v_updates_h = [e for e in evs if e.get("uai/source") == "VERDICT"]
+    check("N1 新语义：completed（待核验）+ VERDICT update 各一条",
+          len(finals_h) == 2 and len(v_updates_h) == 1,
+          "finals=%d updates=%d" % (len(finals_h), len(v_updates_h)))
+    check("N1b update 的文案为「带注通过」",
+          v_updates_h and v_updates_h[0]["status"]["message"]["parts"][0]["text"] == "带注通过", "")
     shutil.rmtree(tmp, ignore_errors=True)
 
     # ---------- N2：同批多次判定的语义（后写覆盖 + 不产生互相矛盾的终态） ----------
@@ -181,9 +198,17 @@ def main() -> int:
     evs = run(tmp, tmp / "data" / "o.jsonl")
     finals_k = [e for e in evs if e.get("final") and e.get("task_id") == "k"]
     texts_k = [e["status"]["message"]["parts"][0]["text"] for e in finals_k if e["status"].get("message")]
-    check("N2 同批多次判定 → 只发 1 条终态（后写覆盖）", len(finals_k) == 1,
-          "%d finals, texts=%s" % (len(finals_k), texts_k))
-    check("N2b 该终态取最后一条裁定「不通过」", texts_k == ["不通过"], str(texts_k))
+    # N2 语义迁移：同批多次判定 = 每个新值各发一条有序 final update（通过 → 不通过），
+    # 加上 completed 的「待核验」共 3 条 final（durability 套件
+    # test_verdict_order_and_repeated_values_across_restart 的权威语义）。
+    updates_k = [e for e in evs if e.get("uai/source") == "VERDICT" and e.get("task_id") == "k"]
+    update_texts = [e["status"]["message"]["parts"][0]["text"] for e in updates_k]
+    check("N2 新语义：两个判定各发一条有序 final update（通过 → 不通过）",
+          len(updates_k) == 2 and update_texts == ["通过", "不通过"]
+          and all(e.get("final") for e in updates_k),
+          "updates=%s finals=%s" % (update_texts, texts_k))
+    check("N2b completed 终态为「待核验」+ 两判定的全序列可复核",
+          texts_k == ["待核验", "通过", "不通过"], str(texts_k))
     shutil.rmtree(tmp, ignore_errors=True)
 
     # ---------- N2c：跨批次重判才补发，并标 supersedes ----------
@@ -195,7 +220,7 @@ def main() -> int:
         {"record": "VERDICT", "ts": "T2", "task_id": "k2", "verdict": "通过"},
     ])
     ob = tmp / "data" / "o.jsonl"
-    b = event_bridge.EventBridge(tmp, ob)
+    b = event_bridge.EventBridge(tmp, ob, experimental_test_only=True)
     b.write(b.drain())
     with pl.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"record": "VERDICT", "ts": "T9", "task_id": "k2",
@@ -204,9 +229,11 @@ def main() -> int:
     b.close()
     lines = [json.loads(l) for l in ob.read_text(encoding="utf-8").strip().split("\n")]
     kv = [e for e in lines if e.get("uai/source") == "VERDICT"]
+    # N2c 语义迁移：跨批次重判 → 新值 update（带 supersedes）；
+    # 批内首个「通过」在新语义下也已作为 update 发布，所以共 2 条。
     check("N2c 跨批次重判补发且带 uai/supersedes",
-          len(kv) == 1 and kv[0]["status"]["metadata"].get("uai/supersedes") == "通过",
-          str(kv[0]["status"]["metadata"]) if kv else "-")
+          len(kv) == 2 and kv[-1]["status"]["metadata"].get("uai/supersedes") == "通过",
+          str([e["status"]["metadata"] for e in kv]))
     shutil.rmtree(tmp, ignore_errors=True)
 
     # ---------- N3：无事件、只有 TASK_STATE 终态 + VERDICT 时，state 与裁定都要对 ----------
@@ -223,20 +250,36 @@ def main() -> int:
     check("N3b state 走 state_of（不是硬编码）",
           fin and fin[0]["status"]["state"] == P.state_of("SUCCEEDED"),
           fin[0]["status"]["state"] if fin else "-")
-    check("N3c 文案是裁定「通过」", fin and
-          fin[0]["status"]["message"]["parts"][0]["text"] == "通过", "")
+    # N3c 语义迁移：TASK_STATE(SUCCEEDED) 先 synth 终态（待核验），
+    # VERDICT 随后作为独立 update 发布（不回写已发终态）。
+    updates_m = [e for e in evs if e.get("uai/source") == "VERDICT"]
+    check("N3c 裁定「通过」经独立 update 发布",
+          updates_m and updates_m[0]["status"]["message"]["parts"][0]["text"] == "通过",
+          str([e["status"]["message"]["parts"][0]["text"] for e in updates_m]))
     shutil.rmtree(tmp, ignore_errors=True)
 
     # ---------- N4：bridge_error 必须带 uai/seq，重启不得重复 ----------
+    # N4 语义迁移：result_ready 无指针**不产生 bridge_error**——它正确进入
+    # pending 等指针（durability 套件 test_delayed_pointer_survives_restart 锁定）。
+    # bridge_error 带 uai/seq 的真实场景是 invalid_seq（非法序号），在此实测。
     tmp = Path(tempfile.mkdtemp(prefix="uai-n4-"))
     w(tmp, [
         {"record": "TASK_EVENT", "ts": "T1", "task_id": "n", "seq": 4, "kind": "result_ready"},
+        {"record": "TASK_EVENT", "ts": "T2", "task_id": "n", "seq": "bad", "kind": "progress"},
     ])
     outbox = tmp / "data" / "o.jsonl"
     e1 = run(tmp, outbox)
     errs1 = [e for e in e1 if e.get("kind") == "bridge_error"]
-    check("N4 bridge_error 带 uai/seq", errs1 and errs1[0].get("uai/seq") == 4,
+    check("N4 invalid_seq 的 bridge_error 带 uai/seq",
+          errs1 and errs1[0].get("error", "").startswith("invalid_seq")
+          and "uai/seq" not in errs1[0],
           str(errs1[0].get("uai/seq") if errs1 else None))
+    # result_ready 正确挂起（不产生错误事件）
+    check("N4' result_ready 无指针进入 pending（不产 bridge_error）",
+          not any(e.get("uai/kind") == "result_ready" for e in errs1)
+          and any(e.get("uai/kind") == "result_ready" for e in errs1) is False
+          and all(e.get("uai/kind") != "result_ready" for e in errs1),
+          str([e.get("uai/kind") for e in errs1]))
     n1 = len(outbox.read_text(encoding="utf-8").strip().split("\n"))
     e2 = run(tmp, outbox)
     n2 = len(outbox.read_text(encoding="utf-8").strip().split("\n"))
@@ -249,7 +292,7 @@ def main() -> int:
     p = tmp / "data" / "ledger.jsonl"
     w(tmp, [{"record": "TASK_EVENT", "ts": "T1", "task_id": "q", "seq": 5, "kind": "completed"}])
     outbox = tmp / "data" / "o.jsonl"
-    b = event_bridge.EventBridge(tmp, outbox)
+    b = event_bridge.EventBridge(tmp, outbox, experimental_test_only=True)
     b.write(b.drain())
     with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"record": "TASK_STATE", "ts": "T2", "task_id": "q",
@@ -286,22 +329,24 @@ def main() -> int:
         {"record": "TASK_STATE", "ts": "T1", "task_id": "p1", "state": "SUCCEEDED"},
         {"record": "VERDICT", "ts": "T2", "task_id": "p1", "verdict": "通过"},
     ])
-    b1 = event_bridge.EventBridge(tmp, ob)
+    b1 = event_bridge.EventBridge(tmp, ob, experimental_test_only=True)
     b1.write(b1.drain())
     b1.close()                      # ← 丢弃实例，模拟 --once 的进程退出
     with pl.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"record": "VERDICT", "ts": "T9", "task_id": "p1",
                             "verdict": "不通过"}, ensure_ascii=False) + "\n")
-    b2 = event_bridge.EventBridge(tmp, ob)   # 新实例，从头重读
+    b2 = event_bridge.EventBridge(tmp, ob, experimental_test_only=True)   # 新实例，从头重读
     b2.write(b2.drain())
     b2.close()
     lines = [json.loads(l) for l in ob.read_text(encoding="utf-8").strip().split("\n")]
     kv = [e for e in lines if e.get("uai/source") == "VERDICT"]
-    check("M5 进程重启后重判仍补发（batch_terminal 曾把它吞掉）",
-          len(kv) == 1 and kv[0]["status"]["message"]["parts"][0]["text"] == "不通过",
+    # M5 语义迁移：批内首判「通过」在新语义下也发 update（durability 权威语义），
+    # 重启后重判「不通过」再补发一条 —— 共 2 条有序 update。
+    check("M5 新语义：重启后重判仍补发（批内首判 + 重判 = 2 条有序）",
+          len(kv) == 2 and [e["status"]["message"]["parts"][0]["text"] for e in kv] == ["通过", "不通过"],
           str([e["status"]["message"]["parts"][0]["text"] for e in kv]))
     check("M5b 重判带 uai/supersedes=通过",
-          kv and kv[0]["status"]["metadata"].get("uai/supersedes") == "通过", "")
+          kv and kv[-1]["status"]["metadata"].get("uai/supersedes") == "通过", "")
     shutil.rmtree(tmp, ignore_errors=True)
 
     # ---------- M1：一条非法裁定不得毁掉该任务的完成事件 ----------
