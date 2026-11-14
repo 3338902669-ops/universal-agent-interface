@@ -12,7 +12,7 @@
 |---|---|---|
 | `projection.py` | 纯函数投影：名片→AgentCard、八态→TaskState、事件→A2A 事件、裁定归一 | `test_projection.py` **10/10** |
 | `a2a_server.py` | 只读 HTTP：`/.well-known/agent-card.json`、`/tasks`、`/tasks/<id>` | `test_a2a_server.py` **12/12** |
-| `inbound.py` | A2A 请求 → 契约 v1 信封（幂等键派生、附件指纹、凭据拦截） | `test_io.py` **27/27** |
+| `inbound.py` | A2A 请求 → 契约 v1 信封（幂等键派生、附件指纹、凭据拦截、**wire_format 版本裁剪**） | `test_io.py` **27/27** |
 | `event_bridge.py` | 账本增量 → A2A 事件 → 只追加出站信箱 | `test_bridge_joins.py` **34/34** |
 | `unified.py` | 两轴状态 + 证据等级×载荷 + 审批校验 + **核验独立性（C-05）** + **证据只认账本（C-04）** | `test_unified.py` **33/33**、`test_p1_batch.py` 中 C-04/C-05 共 16 条 |
 | `identity.py` | LocalToken / OIDC / mTLS / Static 可插拔；无验证器不得升 `authenticated` | `test_identity.py` **10/10** |
@@ -21,6 +21,11 @@
 | `ledger_chain.py` | 只追加账本哈希链：篡改/删链可检出 | `test_p2_batch.py` **32/32**（含 B-03/B-04） |
 | `inbound_bridge.py` | A2A 请求 → 信封 → `hub.submit` 闭环 | `test_a02_inbound.py` **8/8**（需真 lab） |
 | `check-cross-repo-vocab.py` | 跨仓词表一致性（读三仓真实文件） | **17 项 0 漂移** |
+| `a2a_server.py` do_POST | **message/send JSON-RPC 入站端点**（HTTP → hub 闭环） | `test_a04_message_send.py` **5/5**（需 lab） |
+| prototype/`ledger_seal.py` + hub 写路径 | **账本哈希链**（prev/self_hash，篡改可检出，渐进启用） | `test_s8_ledger_live.py` **5/5**（需 lab） |
+| `identity.py` Ed25519Verifier | **真签名验证器**（信任锚+验签，失败降级留 reason） | `test_eid_ed25519.py` **6/6** |
+| `identity.py` OidcVerifier | **JWT 真验签**（RS256/ES256+exp/nbf/iss/aud+kid 严格） | `test_eoidc_jwt.py` **8/8** |
+| `a2a_server.py` _stream_events | **SSE 事件流出站**（/tasks/<id>/events） | `test_a07_sse_stream.py` **3/3**（需 lab） |
 
 合计 **259 条用例**（本地全绿）。`test_a02_inbound.py` 需要真 nats+hub lab；CI 里由
 `../bench/lab.py` 先把 lab 拉起来**真跑**（workflow 里有硬门：该套件若被 skip 即判红）。
@@ -98,12 +103,19 @@ message_texts    {'待核验': 40, '通过': 5, '带注通过': 5, '条件通过
 
 六个 canonical 裁定各 5 次（= 账本真实条数，无重复），「驳回」零残留。
 
-## 边界（没做的）
+## 边界（2026-11-15 收尾后更新）
 
-- 未接 hub 的出站推送：桥是**旁路跟随账本**，不是 hub 主动推。
-- 未接 NATS：服务是 HTTP，没走原实验室的 `iface.<id>.control`。
-- 未做 A2A 的 streaming / push notification，只做请求-响应。
-- 未做入站请求到 hub 的实际投递（只到信封为止）。
+已补上（原"没做的"清单）：
+- ~~入站请求到 hub 的实际投递~~ → `inbound_bridge.py` + a02（9/9）
+- ~~官方 HTTP 入站~~ → `a2a_server.py` do_POST message/send + a04（5/5）
+- ~~账本无哈希链~~ → prototype/ledger_seal.py 接线 + S8-live（5/5，篡改可检出）
+- ~~审批身份只到 asserted~~ → Ed25519Verifier 真验证器 + E-ID（6/6）
+
+仍然没做的（如实，2026-11-15 00:45 更新）：
+- 未接 hub 的出站推送：event_bridge 是**旁路跟随账本**，不是 hub 主动推。
+- push notification（webhook 回调）未做；**SSE streaming 已做并有测试**（`test_a07_sse_stream.py` 3/3，A-07）。
+- OIDC 真 IdP 已实现（`OidcVerifier` RS256/ES256 验签 + exp/nbf/iss/aud + kid 严格匹配，`test_eoidc_jwt.py` 8/8）；缺的只是接真实外部 IdP 的 JWKS URL 配置。
+- event_bridge v1/v2 保持 `experimental_test_only` 生产门禁。
 
 ## 证据等级
 
