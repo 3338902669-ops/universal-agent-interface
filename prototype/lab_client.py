@@ -12,7 +12,7 @@ from typing import Any
 
 import nats
 
-from core import CONTRACT_VERSION, canonical_json, envelope_digest, now_iso
+from core import SUPPORTED_CONTRACT_VERSIONS, canonical_json, envelope_digest, now_iso
 
 
 def build_envelope(
@@ -36,7 +36,7 @@ def build_envelope(
         else {"capability": capability}
     )
     return {
-        "contract_version": CONTRACT_VERSION,
+        "contract_version": "0.2",  # v0.2 遗留客户端，走兼容路径
         "task_id": str(uuid.uuid4()),
         "idempotency_key": f"lab-{uuid.uuid4()}",
         "target": target,

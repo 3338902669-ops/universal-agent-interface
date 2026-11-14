@@ -23,6 +23,7 @@ from nats.aio.msg import Msg
 
 from core import (
     CONTRACT_VERSION,
+    SUPPORTED_CONTRACT_VERSIONS,
     VALID_EVENT_KINDS,
     AppendOnlyJsonl,
     append_log,
@@ -94,6 +95,8 @@ class Hub:
         self.default_lease_seconds = lease_seconds
         self.ledger_path = base / "data" / "ledger.jsonl"
         self.ledger = AppendOnlyJsonl(self.ledger_path)
+        from ledger_seal import LedgerSealer
+        self.sealer = LedgerSealer(self.ledger_path, base / "data" / "chain-heads.jsonl")
         self.connection_log = base / "logs" / "hub-connection.jsonl"
         self.token_hashes_path = base / "data" / "token-hashes.json"
         self.nc: NATS | None = None
@@ -143,7 +146,8 @@ class Hub:
 
     def record(self, record_type: str, **fields: Any) -> dict[str, Any]:
         value = {"record": record_type, "ts": now_iso(), **fields}
-        self.ledger.append(value)
+        # 哈希链接线（2026-11-15）：写前 seal，篡改/删链可检出；历史未链化记录渐进兼容
+        self.ledger.append(self.sealer.seal(value))
         return value
 
     def load_token_hashes(self) -> dict[str, str]:
@@ -264,7 +268,7 @@ class Hub:
             control_subject = str(card["transport"]["control_subject"])
             if card["interface_id"] != interface_id:
                 raise ValueError("interface_id mismatch")
-            if card["contract_version"] != CONTRACT_VERSION:
+            if card["contract_version"] not in SUPPORTED_CONTRACT_VERSIONS:
                 raise ValueError("contract version mismatch")
             capabilities = card["capabilities"]
             if not isinstance(capabilities, list) or not capabilities:

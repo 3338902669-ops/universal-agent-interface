@@ -39,3 +39,10 @@ htmlcov/
 # E-02 published fixtures (root 'fixtures/' would otherwise ignore them)
 !bench/controlled_experiment/fixtures/
 !bench/controlled_experiment/fixtures/**
+
+# 2026-11-15 本机新增排除
+prototype/_ext_agent_e2e.py
+prototype/hub.py.bak-*
+stage2/%SystemDrive%/
+stage2/_apn_work/
+stage2/data/

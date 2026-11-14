@@ -66,7 +66,7 @@ async def submit(
 
     nc = await _connect(nats_url)
     try:
-        payload = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+        payload = json.dumps(inbound.wire_format(envelope, contract_version), ensure_ascii=False).encode("utf-8")
         msg = await nc.request(SUBMIT_SUBJECT, payload, timeout=connect_timeout_s)
         hub_response = json.loads(msg.data.decode("utf-8"))
     finally:

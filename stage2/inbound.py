@@ -171,3 +171,25 @@ def envelope_from_a2a(
             raise InboundError("credential_like_field_in_envelope: %s" % bad)
 
     return envelope
+
+
+# ---------- 线缆格式（v0.2→v1 迁移，2026-11-14） ----------
+# 库内信封统一 v1 表示（含 context_id=None 占位，供 A-06 投影链使用）；
+# 提交给 hub 前按目标版本裁剪字段集，避免对端 unknown_fields 拒绝。
+
+_V1_ONLY_KEYS = ("envelope_id", "priority", "approval", "context_id")
+_V02_REQUIRED_KEYS = ("skill_ref", "resource_key", "params", "attachments")
+
+
+def wire_format(envelope: dict, contract_version: str = "1.0") -> dict:
+    """按目标契约版本返回线缆格式信封（不改入参）。"""
+    if contract_version == "0.2":
+        wire = {k: v for k, v in envelope.items() if k not in _V1_ONLY_KEYS}
+        for k in _V02_REQUIRED_KEYS:
+            wire.setdefault(k, None)
+        if wire.get("attachments") is None:
+            wire["attachments"] = []
+        return wire
+    if contract_version == "1.0":
+        return {k: v for k, v in envelope.items() if k != "context_id"}
+    raise InboundError("unsupported_contract_version: %r" % (contract_version,))

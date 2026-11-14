@@ -930,8 +930,12 @@ class InterfaceProcess:
         stdout_path = self.results_dir / task_id / "runtime.stdout.jsonl"
         stderr_path = self.results_dir / task_id / "runtime.stderr.log"
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_cmd = [self.runtime_executable]
+        if self.runtime_executable.lower().endswith(".py"):
+            # Windows 无法直接 spawn .py；Python 解释器包装（P0 外部 runtime 接入实测踩过）
+            runtime_cmd = [sys.executable, self.runtime_executable]
         command = [
-            self.runtime_executable,
+            *runtime_cmd,
             "exec",
             "--skip-git-repo-check",
             "--sandbox",
