@@ -33,11 +33,12 @@ def main() -> int:
     check("C-03 未配置的 OIDC 验证器不给 authenticated",
           r["approver_authenticity"] == "asserted", str(r))
 
-    # 4. 已配置的 OIDC 但未验签 → 仍 asserted（诚实边界）
+    # 4. 已配置的 OIDC 收到假 JWT → asserted + 明确拒因（2026-11-15 起为真验签实现：
+    #    要么验签通过升 authenticated，要么具名拒绝，不再有未验签中间态）
     oidc2 = I.OidcVerifier(issuer="https://idp.example", jwks={"keys": []})
     r = I.resolve_authenticity({"approver_authenticity": "authenticated", "id_token": "a.b.c"}, oidc2)
-    check("C-03 参考实现不伪造 JWT 验签结论",
-          r["approver_authenticity"] == "asserted" and "not_verified" in (r["reason"] or ""), str(r))
+    check("C-03 真 JWT 验签实现拒绝假令牌（不伪造结论）",
+          r["approver_authenticity"] == "asserted" and bool(r["reason"]), str(r))
 
     # 5. 本地 token：即使匹配也只是 local，不构成跨域
     import hashlib

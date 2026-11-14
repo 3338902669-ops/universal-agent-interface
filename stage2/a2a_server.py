@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import threading
@@ -158,6 +159,74 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             return
+
+    def do_POST(self):  # noqa: N802
+        """JSON-RPC 2.0 message/send：官方 A2A 客户端 HTTP 入站闭环（步骤1）。"""
+        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if path != "/":
+            return self._send(404, {"error": "not_found", "path": path})
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > 262144:
+                return self._rpc_error(None, -32600, "request_too_large")
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as e:
+            return self._rpc_error(None, -32700, "parse_error", str(e)[:100])
+        if not isinstance(body, dict) or body.get("method") != "message/send":
+            return self._rpc_error(
+                body.get("id") if isinstance(body, dict) else None,
+                -32601, "method_not_allowed", "only message/send is supported",
+            )
+        rpc_id = body.get("id")
+        params = body.get("params") or {}
+        nats_url = os.environ.get("NATS_URL", "nats://127.0.0.1:43321")
+        try:
+            import inbound_bridge
+            out = asyncio.run(inbound_bridge.submit(
+                nats_url=nats_url,
+                request={"message": params.get("message") or {}},
+                created_by=str(params.get("created_by") or "a2a-http-client"),
+                target_interface=params.get("target_interface"),
+                target_capability=params.get("target_capability"),
+                timeout_s=int(params.get("timeout_s") or 300),
+                cls=str(params.get("cls") or "readonly"),
+                contract_version="1.0",
+            ))
+        except inbound_bridge.InboundBridgeError as e:
+            return self._rpc_error(rpc_id, -32000, "hub_rejected", str(e)[:200])
+        except Exception as e:  # 连接失败等
+            return self._rpc_error(rpc_id, -32001, "inbound_unavailable", str(e)[:200])
+        # push notification 注册（spec §2）：回调表落盘，push_notifier 旁路消费
+        pnc = params.get("pushNotificationConfig") or {}
+        pnc_url = pnc.get("url")
+        if isinstance(pnc_url, str) and pnc_url.startswith(("http://", "https://")):
+            cbt = Path(self.ledger_path).parent / "push-callbacks.jsonl"
+            cbt.parent.mkdir(parents=True, exist_ok=True)
+            with cbt.open("a", encoding="utf-8", newline="\n") as fh:
+                fh.write(json.dumps({"task_id": out["task_id"], "url": pnc_url,
+                                     "token": pnc.get("token")}, ensure_ascii=False,
+                                    separators=(",", ":")) + "\n")
+
+        # 受理成功：回 A2A 风格 Task（id + 初始 state；终态经 GET /tasks/<id> 查询）
+        return self._send(200, {
+            "jsonrpc": "2.0", "id": rpc_id,
+            "result": {
+                "task": {
+                    "id": out["task_id"],
+                    "status": {"state": "submitted"},
+                    "metadata": {"uai/accepted": True,
+                                 "uai/envelope_sha256": out["hub_response"].get("envelope_sha256")},
+                },
+                "uai/hub_response": out["hub_response"],
+            },
+        })
+
+    def _rpc_error(self, rpc_id, code, message, detail=None):
+        payload = {"jsonrpc": "2.0", "id": rpc_id,
+                   "error": {"code": code, "message": message}}
+        if detail:
+            payload["error"]["data"] = detail
+        return self._send(200, payload)
 
     def do_GET(self):  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
