@@ -1,5 +1,7 @@
 # Universal Agent Interface (UAI)
 
+> 📖 [中文文档 / Chinese README](README.zh-CN.md)
+
 **Cross-vendor agent collaboration with acceptance governance**: agents from different runtimes (Codex, Claude Code, DeepSeek Harness, any CLI) work under one hub — with enforced acceptance gates so that "an agent says DONE" is never trusted until a third-party verifier signs off.
 
 > Honest scope: proven in a real multi-agent delivery pipeline (4 seats, 3,000+ ledger records, 7 fabricated-completion incidents caught). Single-developer small tasks don't need this — deploy cost > benefit.
