@@ -1,91 +1,74 @@
-# Universal Agent Interface
+# Universal Agent Interface (UAI)
 
-Universal Agent Interface is a vendor-neutral contract and reference implementation for coordinating multiple heterogeneous agent runtimes. Version 0.2 defines both a control plane for registration, routing, state transitions, approvals, and verdicts, and a data plane for durable events, result transport, and reconnect recovery.
+**Cross-vendor agent collaboration with acceptance governance**: agents from different runtimes (Codex, Claude Code, DeepSeek Harness, any CLI) work under one hub — with enforced acceptance gates so that "an agent says DONE" is never trusted until a third-party verifier signs off.
 
-The project addresses three recurring coordination problems:
+> Honest scope: proven in a real multi-agent delivery pipeline (4 seats, 3,000+ ledger records, 7 fabricated-completion incidents caught). Single-developer small tasks don't need this — deploy cost > benefit.
 
-- **Dispatch:** turn free-form delegation into a validated task envelope with a target, deadline, idempotency key, resource key, and risk class.
-- **Handoff:** preserve the instruction byte-for-byte, keep delivery at least once, and prevent duplicate execution.
-- **Completion:** keep an executor's declaration separate from an independent verdict. A successful execution state means the work stopped and produced a declaration; it does not by itself mean the task is complete.
+## Why
 
-The v0.2 contract also adds connection registration with an echo check, leases and fencing generations, durable event replay, resource-level serialization, a human approval boundary for external actions, and a fixed six-value verdict vocabulary.
+LLM agents fabricate completions. Prompting can't fix it; mechanisms can. UAI separates **execution state** from **acceptance verdicts**:
 
-## Repository layout
+- `SUCCEEDED` only means "stopped and submitted a claim" — externally projected as "pending verification" until a VERDICT lands.
+- Verifier seat is never the implementer (ENFORCED, tested).
+- Evidence levels E1–E4; self-reported evidence cannot impersonate independent verification.
 
-```text
-.
-├── README.md
-├── LICENSE
-├── docs/
-│   └── spec-v0.2.md
-├── prototype/
-│   ├── core.py
-│   ├── hub.py
-│   ├── interface.py
-│   ├── lab_client.py
-│   └── test_acceptance.py
-└── adapters/
-    └── verification-seat/
-        ├── core.py
-        ├── hub.py
-        ├── interface.py
-        ├── test_acceptance.py
-        ├── test_contract_edges.py
-        └── verify_lab.py
+## Quickstart (30 minutes, Linux/macOS/WSL)
+
+```bash
+git clone https://github.com/3338902669-ops/universal-agent-interface.git
+cd universal-agent-interface
+
+# 1. deps
+pip install nats-py jsonschema cryptography
+
+# 2. NATS (any server ≥2.9)
+nats-server -c prototype/nats-test.conf        # listens 127.0.0.1:43321
+
+# 3. hub
+python prototype/hub.py --base prototype --nats-url nats://127.0.0.1:43321
+
+# 4. verify acceptance gate projection (read-only, no deps on runtime)
+python stage2/test_projection.py               # 10/10
+python stage2/test_a2a_server.py               # 12/12
 ```
 
-`prototype/` is the reference lab implementation. `adapters/` contains the verification-seat adapter with stricter contract edge checks. Both use NATS subjects as the transport for the data plane while keeping the contract independent of that transport choice.
+Full suite (24 suites, 300+ cases) and a real-lab end-to-end (A2A request → envelope → hub → real runtime → ledger) live in [`stage2/DEVELOPMENT.md`](stage2/DEVELOPMENT.md).
 
-## Quick start
+## What's inside
 
-Requirements:
+| Layer | Path | What it does |
+|---|---|---|
+| Contract | `protocol/contract-v1.md`, `schemas/` | v1 envelope (11 required fields), canonical verdict vocabulary, JSON Schema, conformance suite |
+| Prototype | `prototype/` | NATS hub: idempotency, leases+fencing, single-writer resources, ledger hash-chain |
+| Governance (stage2) | `stage2/` | A2A projection (AgentCard/Task/events), inbound message/send, SSE stream, webhook push (HMAC), OIDC/Ed25519 verifiers, unified cross-repo model |
+| Bridges | `stage2/paseo_uai_bridge.py` | Paseo daemon orchestration ↔ UAI acceptance |
 
-- Python 3.10 or newer
-- PowerShell on Windows
-- NATS Server 2.x
-- The Python package `nats-py`
-- A compatible agent CLI exposed through `AGENT_RUNTIME_EXECUTABLE` when exercising the runtime-backed acceptance case
+## Architecture in one picture
 
-Install the Python dependency and make the NATS executable available:
-
-```powershell
-python -m pip install nats-py
-$env:NATS_SERVER = 'C:\tools\nats-server.exe'  # replace with your installed path
+```
+runtime seats (codex / claude / dsh / yours)
+        │  provider CLI
+   Paseo daemon (or any orchestrator)
+        │  envelope (contract v1)
+   UAI hub — ledger (append-only, hash-chained) + verdicts
+        │  projection (AgentCard / Task / SSE / webhook)
+   external A2A consumers
 ```
 
-Run the reference lab:
+Design rule: reuse A2A semantics (AgentCard, task states), replace the transport; acceptance/verdict logic is internal and never outsourced.
 
-```powershell
-powershell -NoProfile -File .\prototype\start_lab.ps1
-python .\prototype\test_acceptance.py --base .\prototype
-powershell -NoProfile -File .\prototype\stop_lab.ps1
-```
+## Key invariants (ENFORCED, each with a test)
 
-The full acceptance harness includes a real 300-second broker outage. Run the verification-seat adapter checks the same way:
+- SUCCEEDED ≠ passed — projection writes "pending verification" without a verdict
+- idempotency treats loss only; fabrication is handled by the verdict seat
+- verifier ≠ implementer; unknown side-effect state forbids auto-retry
+- no verifier configured → identity stays `asserted`, never upgraded
+- `experimental_test_only` gate on event_bridge until a real cross-vendor consumer exists
 
-```powershell
-$adapterDir = (Get-ChildItem .\adapters -Directory | Select-Object -First 1).FullName
-powershell -NoProfile -File (Join-Path $adapterDir 'start_lab.ps1')
-python (Join-Path $adapterDir 'test_acceptance.py') --base $adapterDir
-python (Join-Path $adapterDir 'test_contract_edges.py') --base $adapterDir
-powershell -NoProfile -File (Join-Path $adapterDir 'stop_lab.ps1')
-python (Join-Path $adapterDir 'verify_lab.py') --base $adapterDir
-```
+## Status / honest gaps
 
-The labs bind only to loopback ports. They create their own local tokens, ledger, outbox, logs, and evidence directories at runtime. Those paths are ignored by Git and must not be committed.
+- Cross-vendor identity: OIDC verifier ready (production JWKS verified against Microsoft), real IdP issuance is account-side work
+- A2A streaming: SSE done; push notifications done (webhook, HMAC); gRPC binding not planned
+- event_bridge v1/v2 remain behind `experimental_test_only` until a real external consumer exists
 
-This repository is a lab-grade reference implementation. It does not include production communication code, production seat configuration, production credentials, or the operations lab that is still being migrated.
-
-## Relationship to A2A and MCP
-
-A2A describes agent cards and task lifecycles across agent systems. Version 0.2 covers related concepts, with additional requirements for artifact fingerprints and read-back, strong links and replay, lease fencing, and a verdict layer separate from execution state. A future implementation may reuse A2A field names where they fit; conflicts resolve to this contract.
-
-MCP connects models and runtimes to tools and resources. Tool invocation belongs inside an interface implementation and is outside this contract. MCP and this project occupy different layers and do not replace each other.
-
-## Security boundary
-
-Authentication material is represented by references and hashes. The contract requires interface tokens to stay local, approvals to be bound to one envelope and action, and external actions to pass the approval gate. The lab provisions disposable tokens and a lab-only approval signing key at runtime. Never commit `.lab-tokens/`, `data/`, `logs/`, `evidence/`, `runtime/`, private keys, or captured credentials.
-
-## License
-
-Licensed under the [Apache License 2.0](LICENSE).
+License: see LICENSE. Paseo bridge operates under AGPL-3.0 constraints of the upstream project.

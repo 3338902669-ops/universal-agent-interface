@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uai-governance"
+version = "0.15.4.post1"
+description = "Cross-vendor agent collaboration with acceptance governance (UAI stage2)"
+requires-python = ">=3.10"
+dependencies = ["nats-py>=2", "jsonschema>=4", "cryptography>=42"]
+license = {text = "MIT"}
+
+[tool.setuptools]
+packages = ["projection", "identity", "inbound", "inbound_bridge", "push_notifier",
+            "subscription_rotator", "prompt_registry", "unified", "reassign",
+            "hub_singleton", "ledger_chain", "event_bridge", "event_bridge_v2",
+            "a2a_server"]
+package-dir = {"" = "stage2"}
