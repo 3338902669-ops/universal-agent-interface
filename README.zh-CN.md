@@ -70,10 +70,10 @@ runtime 席位 (codex / claude / dsh / 你的)
 - [examples/bridge-paseo](examples/bridge-paseo)：Paseo 编排对接（端到端已验证）
 - [examples/second-runtime](examples/second-runtime)：接入第二厂商 runtime 的 150 行 adapter 范式
 
-## 安装（PyPI，已构建 wheel）
+## 安装（PyPI 已发布）
 
 ```bash
-pip install uai-governance   # 待发布——wheel 已构建并在隔离 venv 冒烟验证
+pip install uai-governance
 ```
 
 ## 现状 / 诚实缺口
