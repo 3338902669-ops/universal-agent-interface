@@ -9,6 +9,7 @@ description = "Cross-vendor agent collaboration with acceptance governance (UAI 
 requires-python = ">=3.10"
 dependencies = ["nats-py>=2", "jsonschema>=4", "cryptography>=42"]
 license = {text = "MIT"}
+readme = "README.md"
 
 [tool.setuptools]
 package-dir = {"" = "stage2"}
