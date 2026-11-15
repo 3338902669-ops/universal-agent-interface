@@ -1,6 +1,6 @@
 // Paseo SDK runner:创建 agent → run → 等完成 → 取回复
 // 用法: node paseo_runner.mjs '{"provider":"codex","cwd":"...","prompt":"...","timeout_s":300}'
-import { createPaseoClient } from "file:///C:/Users/33389/AppData/Roaming/npm/node_modules/@getpaseo/cli/node_modules/@getpaseo/client/dist/index.js";
+import { createPaseoClient } from process.env.UAI_PASEO_CLIENT || "@getpaseo/client";
 
 const cfg = JSON.parse(process.argv[2] || "{}");
 const client = createPaseoClient({ url: "ws://127.0.0.1:6767/ws" });

@@ -14,13 +14,14 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
 UAI_STAGE2 = Path(__file__).resolve().parent
-PASEO_NODE = "D:/龙虾/node.exe"
+PASEO_NODE = os.environ.get("UAI_PASEO_NODE", "node")  # 本机部署可设 D:/龙虾/node.exe
 PASEO_RUNNER = UAI_STAGE2 / "paseo_runner.mjs"
-DEFAULT_WORKDIR = "C:/Users/33389/workspace/scratch/paseo-bridge-test"
+DEFAULT_WORKDIR = os.environ.get("UAI_PASEO_WORKDIR", tempfile.gettempdir())
 
 
 def paseo_execute(prompt: str, workdir: str = DEFAULT_WORKDIR,

@@ -16,7 +16,7 @@ def check(name, cond, detail=""):
 
 
 def main() -> int:
-    reg = PromptRegistry()
+    reg = PromptRegistry(template_dir=r"C:\Users\33389\.shared\prompt-templates")
 
     # 真实库全量解析
     items = reg.list()

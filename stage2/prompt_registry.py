@@ -11,6 +11,7 @@ paseo initialPrompt 从此取：load(name) → render(vars) → 纯文本提示�
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -18,19 +19,20 @@ VAR_PATTERN = re.compile(r"\{([A-Z_]+)\}")
 REQUIRED_META = ("name", "description")
 
 
-class PromptRegistry:
-    DEFAULT_DIR = Path("C:/Users/33389/.shared/prompt-templates")  # 本机固定路径，环境缺失时兜底
+def _default_template_dir() -> Path:
+    """三级回退: UAI_PROMPT_TEMPLATES env > home 探测 > cwd 相对目录。"""
+    env = os.environ.get("UAI_PROMPT_TEMPLATES")
+    if env:
+        return Path(env)
+    try:
+        return Path.home() / ".shared" / "prompt-templates"
+    except RuntimeError:
+        return Path("prompt-templates")
 
+
+class PromptRegistry:
     def __init__(self, template_dir: str | Path | None = None):
-        if template_dir:
-            resolved = Path(template_dir)
-        else:
-            try:
-                resolved = Path.home() / ".shared" / "prompt-templates"
-                resolved.exists()  # 探测 home 可用性
-            except RuntimeError:
-                resolved = self.DEFAULT_DIR
-        self.template_dir = resolved
+        self.template_dir = Path(template_dir) if template_dir else _default_template_dir()
 
     def list(self) -> list[dict]:
         out = []
