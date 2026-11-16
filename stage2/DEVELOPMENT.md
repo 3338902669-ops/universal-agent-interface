@@ -19,6 +19,7 @@
 | `reassign.py` | 改派：围栏+1、attempt+1、必须带原因、终态不可改派 | `test_p1_batch.py` 中 A-11 共 12 条 |
 | `hub_singleton.py` | 中枢单实例：**OS 独占锁**（`msvcrt.locking`/`flock`）裁决 + 持有者校验 + 接管留痕落盘 + 无写权拒绝派发 | `test_a09_singleton.py` **28/28**（含 8 进程真并发 + 真入口拒绝启动） |
 | `outcome_recorder.py` | **裁定 → 团队记忆图谱的生产写入点（UAI-08）**：幂等键 `task_id\|verdict`、凭据样文本整条跳过、fail-open | `test_uai08_graph_write.py` **21/21**（含真图谱写入与去重） |
+| `ledger_archive.py` | **UAI-09 心跳归档**：字节级抽取 + 清单 + 校验 + 桥接压缩（只另存，不改源） | `test_uai09_ledger_archive.py` **36/36** |
 | `ledger_chain.py` | 只追加账本哈希链：篡改/删链可检出 | `test_p2_batch.py` **32/32**（含 B-03/B-04） |
 | `inbound_bridge.py` | A2A 请求 → 信封 → `hub.submit` 闭环 | `test_a02_inbound.py` **8/8**（需真 lab） |
 | `check-cross-repo-vocab.py` | 跨仓词表一致性（读三仓真实文件） | **17 项 0 漂移** |
@@ -28,7 +29,7 @@
 | `identity.py` OidcVerifier | **JWT 真验签**（RS256/ES256+exp/nbf/iss/aud+kid 严格） | `test_eoidc_jwt.py` **8/8** |
 | `a2a_server.py` _stream_events | **SSE 事件流出站**（/tasks/<id>/events） | `test_a07_sse_stream.py` **3/3**（需 lab） |
 
-合计 **320 条用例**（本地全绿）。2026-11-17 追加：A-09 真并发 + 入口守卫（`test_a09_singleton.py` 13→28）、B-01 轮次 25 条（`test_b01_rounds.py`）、UAI-08 图谱写入 21 条（`test_uai08_graph_write.py`），原 259 条基线未变。`test_a02_inbound.py` 需要真 nats+hub lab；CI 里由
+合计 **356 条用例**（本地全绿）。2026-11-17 追加：A-09 真并发 + 入口守卫（`test_a09_singleton.py` 13→28）、B-01 轮次 25 条（`test_b01_rounds.py`）、UAI-08 图谱写入 21 条（`test_uai08_graph_write.py`）、UAI-09 归档 36 条（`test_uai09_ledger_archive.py`），原 259 条基线未变。`test_a02_inbound.py` 需要真 nats+hub lab；CI 里由
 `../bench/lab.py` 先把 lab 拉起来**真跑**（workflow 里有硬门：该套件若被 skip 即判红）。
 协议侧另有 `../protocol/tests/conformance/` **22 项**；`../protocol/GAR-OPEN-ITEMS-REF.md` 记录了
 C-06~C-10 这些**必须由 GAR 侧闭合**的项及验收口径。
