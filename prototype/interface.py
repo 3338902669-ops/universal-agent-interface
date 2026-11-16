@@ -836,6 +836,46 @@ class InterfaceProcess:
             else:
                 raise RuntimeError("test executor requires params.test_mode")
 
+            # I-2: 协商语义集成——检测 agent 返回的协商信号
+            negotiation_response = None
+            try:
+                content_str = content.decode("utf-8", errors="replace")
+                import re as _re
+                m_reject = _re.search(r"\[NEGOTIATION:REJECT\]\s*(.+)", content_str)
+                m_counter = _re.search(r"\[NEGOTIATION:COUNTER_OFFER\]\s*(.+)", content_str)
+                m_delegate = _re.search(r"\[NEGOTIATION:DELEGATE:(\S+)\]", content_str)
+                if m_reject:
+                    negotiation_response = {"type": "reject", "reason": m_reject.group(1)[:200]}
+                elif m_delegate:
+                    negotiation_response = {"type": "delegate", "target": m_delegate.group(1)}
+                elif m_counter:
+                    negotiation_response = {"type": "counter_offer", "conditions": m_counter.group(1)[:200]}
+            except Exception:
+                pass
+
+            if negotiation_response and negotiation_response["type"] in ("reject", "delegate"):
+                # agent 拒绝/转派 → 发协商事件，不标记成功
+                self.state.append_event(
+                    interface_id=self.interface_id,
+                    task_id=task_id,
+                    trace_id=trace_id,
+                    seq=seq,
+                    fencing_generation=generation,
+                    kind="negotiation_rejected",
+                    payload={"negotiation": negotiation_response},
+                )
+                seq += 1
+                await self.state.execution_finished(
+                    task_id, False, f"negotiation_{negotiation_response['type']}"
+                )
+                self.operation(
+                    task_id,
+                    "negotiation_response",
+                    task_id,
+                    json.dumps(negotiation_response, ensure_ascii=False),
+                )
+                return
+
             heartbeat_stop.set()
             if heartbeat_task:
                 with contextlib.suppress(asyncio.CancelledError):
