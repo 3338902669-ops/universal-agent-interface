@@ -89,7 +89,10 @@ def build_dynamic_card(interface_id, capabilities, public_url, hub_url, descript
     return {
         "name": interface_id,
         "description": description or ("UAI hub agent: %s" % interface_id),
-        "url": public_url,
+        "supportedInterfaces": [{
+                "protocolBinding": "JSONRPC",
+            "protocolVersion": "1.0"
+        }],
         "version": "0.15.4",
         "capabilities": {"streaming": True, "pushNotifications": True, "stateTransitionHistory": True},
         "skills": [{"id": c.get("name",""), "name": c.get("name",""), "description": c.get("description",""), "tags": ["uai"]} for c in capabilities],
