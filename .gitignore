@@ -49,3 +49,6 @@ stage2/data/
 
 # 端到端测试环境（含 token，不入库）
 prototype_clean/
+
+# tianshu (rivet) 在 adapter 工作目录里生成的 hooks
+stage2/.rivet/
