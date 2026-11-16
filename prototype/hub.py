@@ -93,6 +93,8 @@ class Hub:
         self.base = base
         self.nats_url = nats_url
         self.default_lease_seconds = lease_seconds
+        # UAI-08：裁定写回图谱的超时（秒）。图谱慢/挂不能拖住裁定。
+        self.graph_memory_timeout_s = float(os.environ.get("UAI_GRAPH_MEMORY_TIMEOUT", "3.0"))
         self.ledger_path = base / "data" / "ledger.jsonl"
         self.ledger = AppendOnlyJsonl(self.ledger_path)
         # 心跳是连接保活，不是审计凭证：单独落盘，不进哈希链主账本
@@ -1424,7 +1426,62 @@ class Hub:
             execution_state=task.state,
         )
         task.verdict = record
-        self.json_response(msg, {"ok": True, "verdict_record": record})
+        graph_memory = await self._record_graph_outcome(task, verdict)
+        self.json_response(
+            msg,
+            {
+                "ok": True,
+                "verdict_record": record,
+                "graph_memory": graph_memory,
+            },
+        )
+
+    async def _record_graph_outcome(self, task: "Task", verdict: str) -> dict[str, Any]:
+        """UAI-08：把裁定写回团队记忆图谱。
+
+        图谱是**派生数据**：写不进去也不能挡住裁定。三条约束由
+        `stage2/outcome_recorder.py` 保证（幂等键、凭据过滤、fail-open），
+        这里只负责两件事——不让它阻塞中枢，以及**写丢要留痕**。
+        """
+        import sys as _sys
+
+        stage2 = Path(__file__).resolve().parent.parent / "stage2"
+        if str(stage2) not in _sys.path:
+            _sys.path.insert(0, str(stage2))
+        try:
+            from outcome_recorder import record_verdict_outcome
+        except Exception as exc:
+            return {"written": False, "reason": "recorder_unavailable:%s" % str(exc)[:100]}
+
+        envelope = task.envelope or {}
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    record_verdict_outcome,
+                    task_id=task.task_id,
+                    verdict=verdict,
+                    agent_id=task.selected_interface or "unknown",
+                    description=envelope.get("instruction") or "",
+                    success=verdict in ("通过", "带注通过"),
+                    source="uai.hub.on_verdict",
+                ),
+                timeout=self.graph_memory_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            result = {"written": False, "reason": "timeout"}
+        except Exception as exc:
+            result = {"written": False, "reason": "error:%s" % str(exc)[:100]}
+
+        if not result.get("written"):
+            # 写丢要留痕：账本里查得到，而不是只沉在日志里
+            self.record(
+                "MEMORY_OUTCOME",
+                task_id=task.task_id,
+                verdict=verdict,
+                reason=result.get("reason"),
+                key=result.get("key"),
+            )
+        return result
 
     async def on_debug(self, msg: Msg) -> None:
         request = self._decode(msg)
@@ -1504,6 +1561,21 @@ class Hub:
 
     async def run(self) -> None:
         await self.connect()
+
+        # A-09：持锁期间周期性续期。TTL 只用于告警（stale/wedged），不再用于夺权，
+        # 所以这里只需要让 status() 别误报；真裁决在 OS 锁上。
+        guard = getattr(self, "_guard", None)
+        heartbeat_task: asyncio.Task[Any] | None = None
+        if guard is not None:
+            async def _singleton_beat() -> None:
+                while True:
+                    await asyncio.sleep(max(5.0, float(guard.ttl_s) / 3.0))
+                    try:
+                        guard.heartbeat()
+                    except Exception:
+                        return
+
+            heartbeat_task = asyncio.create_task(_singleton_beat())
         loop = asyncio.get_running_loop()
         for signal_name in (signal.SIGINT, signal.SIGTERM):
             with contextlib.suppress(NotImplementedError):
@@ -1523,6 +1595,10 @@ class Hub:
             flush=True,
         )
         await self.stop_event.wait()
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await heartbeat_task
         if self.nc:
             await self.nc.drain()
 
@@ -1542,13 +1618,58 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+EXIT_ALREADY_RUNNING = 3
+
+
+def _acquire_hub_singleton(base: Path):
+    """A-09：同一个 base 只允许一个中枢持有写权。"""
+    import sys as _sys
+
+    stage2 = Path(__file__).resolve().parent.parent / "stage2"
+    if str(stage2) not in _sys.path:
+        _sys.path.insert(0, str(stage2))
+    try:
+        from hub_singleton import HubSingleton
+    except Exception as exc:
+        return None, {"reason": "singleton_unavailable:%s" % str(exc)[:100]}
+
+    guard = HubSingleton(
+        base / "data" / "hub.lock",
+        namespace="uai-hub",
+        ttl_s=float(os.environ.get("UAI_HUB_SINGLETON_TTL", "600")),
+    )
+    ok, info = guard.acquire()
+    return (guard, info) if ok else (None, info)
+
+
 def main() -> int:
     args = parse_args()
-    hub = Hub(args.base.resolve(), args.nats_url, args.lease_seconds)
+    base = args.base.resolve()
+    guard, info = _acquire_hub_singleton(base)
+    if guard is None:
+        # 第二个中枢**不许**降级成只读继续订阅：那会双派、双写账本。
+        # 2026-11-17 实测过：两个中枢各写一份 TASK_ACCEPTED / VERDICT。
+        print(
+            json.dumps(
+                {
+                    "event": "hub_singleton_denied",
+                    "reason": info.get("reason"),
+                    "holder": info.get("holder"),
+                    "pid": os.getpid(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return EXIT_ALREADY_RUNNING
+    hub = Hub(base, args.nats_url, args.lease_seconds)
+    hub._guard = guard  # run() 里续期，退出时释放
     try:
         asyncio.run(hub.run())
     except KeyboardInterrupt:
         return 130
+    finally:
+        guard.release()
     return 0
 
 

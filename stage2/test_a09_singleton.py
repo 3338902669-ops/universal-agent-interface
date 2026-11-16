@@ -228,6 +228,31 @@ def scenario_concurrent(tmp):
           HS.HubSingleton(path, namespace="lab", ttl_s=30).status().get("held") is False, "")
 
 
+
+def scenario_hub_entry_guard(tmp):
+    """真入口守卫：锁被别人持有时，hub.py 必须**退出**（码 3），不是继续跑。"""
+    base = os.path.join(tmp, "hubbase")
+    os.makedirs(os.path.join(base, "data"), exist_ok=True)
+    lock = os.path.join(base, "data", "hub.lock")
+
+    g = HS.HubSingleton(lock, namespace="uai-hub", ttl_s=600)
+    okG, _ = g.acquire()
+    check("A-09 测试侧先持锁", okG is True, "")
+
+    hub_py = os.path.join(os.path.dirname(HERE), "prototype", "hub.py")
+    proc = subprocess.run(
+        [sys.executable, hub_py, "--base", base, "--nats-url", "nats://127.0.0.1:1"],
+        capture_output=True, text=True, timeout=60,
+    )
+    out = (proc.stdout or "") + (proc.stderr or "")
+    check("A-09 第二个中枢启动即退出（码 3，不降级）", proc.returncode == 3,
+          "exit=%s" % proc.returncode)
+    check("A-09 退出原因写明被谁持有",
+          "hub_singleton_denied" in out and "held_by_other" in out,
+          out.strip().splitlines()[-1][:70] if out.strip() else "no output")
+
+    g.release()
+
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="uai-singleton-")
     scenario_basic(tmp)
@@ -235,6 +260,7 @@ def main() -> int:
     scenario_ttl_wedged(tmp)
     scenario_namespace(tmp)
     scenario_concurrent(tmp)
+    scenario_hub_entry_guard(tmp)
 
     print("\nRESULT: %d/%d passed" % (len(PASSES), len(PASSES) + len(FAILS)))
     return 0 if not FAILS else 1

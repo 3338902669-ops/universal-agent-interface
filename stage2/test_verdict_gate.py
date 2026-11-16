@@ -8,9 +8,13 @@
 """
 import asyncio
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
+
+# 本套件用的是假任务 id：绝不往真图谱写记忆（UAI-08 的写入点默认开启）
+os.environ["UAI_GRAPH_OUTCOMES"] = "0"
 
 STAGE2 = Path(__file__).resolve().parent
 PROTO = STAGE2.parent / "prototype"

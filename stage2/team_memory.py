@@ -31,9 +31,6 @@ def _now_iso_source():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
 
-def _now_iso_source():
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
 
 class TeamMemoryBridge:
     def __init__(self, uri="bolt://127.0.0.1:7687", user="neo4j", password="graphiti",
@@ -180,18 +177,48 @@ class TeamMemoryBridge:
         block += "[团队记忆结束]\n\n"
         return block + task_desc
 
-    def record_outcome(self, agent_id, task_desc, success, verdict, source="stage2.team_memory"):
-        drv = self._get_driver()
+    def record_outcome(self, agent_id, task_desc, success, verdict,
+                       source="stage2.team_memory", key=None):
+        """把一次任务结果写回图谱。
+
+        `key` 给定时按 `uai_key` MERGE —— 同一 `(task_id, verdict)` 只留一条记忆，
+        hub 重启或重投都不会写出第二份。不给 key 则保持旧的 CREATE 行为（兼容）。
+
+        返回 {"ok": bool, "created": bool, "seen": int, "reason"?: str}，
+        **不抛异常**：图谱是派生数据，调用方（hub 的裁定路径）不能被它拖住。
+        """
         summary = "%s executed '%s' result: %s (verdict: %s)" % (
             agent_id, task_desc[:100], "success" if success else "fail", verdict)
         try:
+            drv = self._get_driver()
+        except Exception as exc:
+            return {"ok": False, "reason": "driver_unavailable:%s" % str(exc)[:100]}
+
+        params = {"name": agent_id + " task outcome", "summary": summary,
+                  "rt": _now_iso_source(), "src": source}
+        try:
             with drv.session() as session:
-                session.run(
-                    "CREATE (e:Episodic {name: $name, summary: $summary, "
-                    "created_at: datetime(), reference_time: $rt, "
-                    "source: $src, group_id: 'neo4j'})",
-                    {"name": agent_id + " task outcome", "summary": summary,
-                     "rt": _now_iso_source(), "src": source},
-                )
-        except Exception:
-            pass
+                if key is None:
+                    session.run(
+                        "CREATE (e:Episodic {name: $name, summary: $summary, "
+                        "created_at: datetime(), reference_time: $rt, "
+                        "source: $src, group_id: 'neo4j'})",
+                        params,
+                    )
+                    return {"ok": True, "created": True, "seen": None}
+
+                # uai_seen: 第一次写 = 1（created），之后每次命中 = +1（去重）
+                rec = session.run(
+                    "MERGE (e:Episodic {uai_key: $key}) "
+                    "ON CREATE SET e.name = $name, e.summary = $summary, "
+                    "              e.created_at = datetime(), e.reference_time = $rt, "
+                    "              e.source = $src, e.group_id = 'neo4j', e.uai_seen = 1 "
+                    "ON MATCH SET e.uai_seen = coalesce(e.uai_seen, 0) + 1, "
+                    "             e.uai_last_seen_at = datetime() "
+                    "RETURN e.uai_seen AS seen",
+                    dict(params, key=key),
+                ).single()
+            seen = int((rec or {}).get("seen") or 0)
+            return {"ok": True, "created": seen == 1, "seen": seen}
+        except Exception as exc:
+            return {"ok": False, "reason": "graph_error:%s" % str(exc)[:100]}
