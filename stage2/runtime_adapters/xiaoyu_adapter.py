@@ -1,39 +1,38 @@
-"""xiaoyu（Grok 席位）文件信箱适配器。
+"""xiaoyu（Grok 席位）唤醒适配器 —— comms-v2 legacy task 通道。
 
-## 为什么是这个形态，而不是 MCP / CLI
+## 真实链路（2026-11-17 实测打通，E1）
 
-权威事实（图谱 Entity「Grok Bot」「小羽」+ 本机实测 2026-11-17）：
+    interface.py argv
+      -> 写 .shared/muse-bridge/wake-msg.txt（comms-v2 格式任务单）
+      -> 运行 wake-grok.ps1（MuseWakeGrok 指向它）
+           UIA 恢复并置前 Grok Bot 窗口
+           找 Edit(name=提示词) 写入任务单
+           Enter 发送
+      -> Grok Bot 自己执行
+      -> 写 cloud-outbox/comms-tasks/<task_id>.txt
+      -> 本适配器读到该文件，作为结果返回
 
-- Grok Bot 本体没有 CLI、不监听任何端口（实测 9 个 Electron 进程均无监听）
-- 它的调度通道就是文件信箱：cloud-outbox 收单、cloud-inbox 回件，cron 每 15 分钟轮询
-- 唤醒靠 schtasks /Run /TN MuseWakeGrok -> muse-bridge/wake-grok.ps1（该脚本当前缺失）
-- 它不只是接单方：2026-11-15 它反过来给 dsh 派过单（cloud-inbox/xiaoyu-20261115-*.md）
+实测：00:36:42 发送 -> 00:36:56 结果落盘（14 秒）。
 
-所以正确的接入方式是文件信箱：
-interface 把任务写成任务卡放进 cloud-outbox，等它写回执，再读回执。
+## 任务单格式（由运维给定，照抄）
 
-## interface.py 发出的 argv
+    comms-v2 v0.2 legacy task, task <task_id>: <instruction>
+    When done, write the result as plain text into <path>. Writing the file completes the task; do not send a mail reply.
 
-    <runtime> exec --skip-git-repo-check --sandbox read-only --ephemeral --json -C <workdir> <instruction>
+## 历史背景（为什么不再用 TASK-*.md + RE-*.md）
 
-本适配器取 instruction 与 workdir，其余忽略。
-
-## 流程
-
-1. 生成 task_id（可用 XIAOYU_TASK_ID 指定，便于外部关联）
-2. 写 cloud-outbox/TASK-xiaoyu-<task_id>.md（格式对齐既有 TASK-GROKBOT-*）
-3. 若 MuseWakeGrok 的脚本存在则触发一次唤醒；不存在则如实记录，等 cron 轮询
-4. 轮询回执：cloud-outbox/RE-*<task_id>*.md 或 cloud-inbox/*xiaoyu*<task_id>*.md
-5. 拿到回执 -> 以 codex 形状 JSONL 输出，text 为回执正文
-6. 超时 -> 输出 xiaoyu_no_receipt，退出码 124（告知上层：不是失败，是没回件）
+早期派单走 cloud-outbox/TASK-GROKBOT-*.md 再等 RE-*.md，实测间隔约 39 分钟，
+依赖 cron 轮询。comms-v2 通道是唤醒式，秒级，且结果路径由任务单指定。
 
 ## 环境变量
 
-- XIAOYU_ROOT / XIAOYU_OUTBOX / XIAOYU_INBOX：信箱目录
-- XIAOYU_TASK_ID：指定 task_id
-- XIAOYU_TIMEOUT_S：等回执秒数，默认 1200（覆盖 cron 15 分钟窗口）
-- XIAOYU_POLL_S：轮询间隔，默认 20
-- XIAOYU_NO_WAKE=1：不尝试唤醒
+- XIAOYU_BRIDGE        默认 C:/Users/33389/.shared/muse-bridge
+- XIAOYU_TASKS_DIR     默认 C:/Users/33389/.shared/cloud-outbox/comms-tasks
+- XIAOYU_TASK_ID       指定 task_id（默认短 uuid）
+- XIAOYU_TIMEOUT_S     等结果秒数，默认 300
+- XIAOYU_POLL_S        轮询间隔，默认 2
+- XIAOYU_NO_WAKE=1     只写任务单不触发唤醒（调试用）
+- XIAOYU_TRIGGER       auto|script|schtasks，默认 auto
 """
 
 from __future__ import annotations
@@ -46,9 +45,12 @@ import time
 import uuid
 from pathlib import Path
 
-DEFAULT_ROOT = Path("C:/Users/33389/.shared")
+BRIDGE = Path("C:/Users/33389/.shared/muse-bridge")
+TASKS_DIR = Path("C:/Users/33389/.shared/cloud-outbox/comms-tasks")
+WAKE_SCRIPT = BRIDGE / "wake-grok.ps1"
+WAKE_MSG = BRIDGE / "wake-msg.txt"
 WAKE_TASK = "MuseWakeGrok"
-WAKE_SCRIPT = Path("C:/Users/33389/.shared/muse-bridge/wake-grok.ps1")
+PS51 = "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 
 VALUE_FLAGS = {"-C", "--cd", "--sandbox", "--output-last-message", "--permission-mode"}
 BOOL_FLAGS = {"exec", "--json", "--ephemeral", "--skip-git-repo-check", "--stream-json"}
@@ -82,78 +84,62 @@ def emit(typ, **fields):
     print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 
-def card_text(task_id, instruction, workdir, receipt_name):
-    lines = [
-        "# 任务卡：UAI 中台派单（xiaoyu 席位）",
-        "",
-        "- 来源：UAI 中台（4223）interface 派发，经文件信箱转交",
-        "- 席位：xiaoyu（小羽 / Grok 席位）",
-        "- task_id：" + chr(96) + task_id + chr(96),
-        "- 工作目录：" + chr(96) + workdir + chr(96),
-        "- 类型：按 instruction 内容自行判断；默认只读",
-        "",
-        "## 任务正文",
-        "",
-        instruction,
-        "",
-        "## 回执",
-        "",
-        "请写 cloud-outbox/" + receipt_name + "（文件名必须含上面的 task_id）。",
-        "逐条作答，每条标 E1/E2/E3/E4；拿不到的写 UNKNOWN，不猜。",
-        "",
-        "## 边界",
-        "",
-        "- 只读或按 instruction 明确授权；不外发、不部署、不改他人文件",
-        "- 不写图谱，不写 CURRENT-TASK.md",
-        "",
-    ]
-    return chr(10).join(lines)
+def task_spec(task_id, instruction, result_path):
+    """comms-v2 legacy task 任务单（运营给定格式，勿改）"""
+    head = "comms-v2 v0.2 legacy task, task " + task_id + ": " + instruction
+    tail = ("When done, write the result as plain text into " + str(result_path)
+            + ". Writing the file completes the task; do not send a mail reply.")
+    return head + chr(10) + tail + chr(10)
 
 
-def write_card(outbox, task_id, instruction, workdir):
-    outbox.mkdir(parents=True, exist_ok=True)
-    receipt_name = "RE-xiaoyu-" + task_id + ".md"
-    p = outbox / ("TASK-xiaoyu-" + task_id + ".md")
-    p.write_text(card_text(task_id, instruction, workdir, receipt_name), encoding="utf-8")
-    return p
+def write_spec(msg_file, text):
+    msg_file.parent.mkdir(parents=True, exist_ok=True)
+    msg_file.write_text(text, encoding="utf-8")
+    return msg_file
 
 
-def try_wake():
-    """返回唤醒结果描述。脚本缺失时不假装成功。"""
-    if os.environ.get("XIAOYU_NO_WAKE") == "1":
-        return "skipped_by_env"
-    if not WAKE_SCRIPT.is_file():
-        return "wake_script_missing:" + str(WAKE_SCRIPT)
-    try:
-        r = subprocess.run(["schtasks", "/Run", "/TN", WAKE_TASK],
-                           capture_output=True, timeout=30)
-        return "wake_ok" if r.returncode == 0 else "wake_failed:%d" % r.returncode
-    except Exception as exc:
-        return "wake_error:" + str(exc)[:120]
+def trigger(mode, bridge=None):
+    """返回 (ok, detail)。auto = 先试脚本直调，失败回退 schtasks。
 
-
-def find_receipt(outbox, inbox, task_id):
-    """在 outbox 与 inbox 里找含 task_id 的回执。-> (path, text) 或 None"""
-    for d in (outbox, inbox):
-        if not d.is_dir():
-            continue
+    bridge 必须显式传入：否则测试/多实例场景会误用模块常量指向的真实路径。
+    """
+    if mode == "none":
+        return False, "skipped_by_env"
+    wake_script = (Path(bridge) if bridge else BRIDGE) / "wake-grok.ps1"
+    errors = []
+    if mode in ("auto", "script") and wake_script.is_file():
         try:
-            items = sorted(d.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-        except Exception:
-            continue
-        for p in items:
-            if not p.is_file():
-                continue
-            n = p.name
-            if task_id not in n:
-                continue
-            if not (n.startswith("RE-") or n.startswith("xiaoyu-")):
-                continue
-            try:
-                return p, p.read_text(encoding="utf-8", errors="replace")
-            except Exception:
-                continue
-    return None
+            r = subprocess.run(
+                [PS51, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-File", str(wake_script)],
+                capture_output=True, timeout=180,
+            )
+            if r.returncode == 0:
+                return True, "script_ok"
+            tail = (r.stdout or b"").decode("utf-8", "replace")[-200:]
+            errors.append("script_rc=%d %s" % (r.returncode, tail[-120:]))
+        except Exception as exc:
+            errors.append("script_exc:%s" % str(exc)[:100])
+    if mode in ("auto", "schtasks"):
+        try:
+            r = subprocess.run(["schtasks", "/Run", "/TN", WAKE_TASK],
+                               capture_output=True, timeout=30)
+            if r.returncode == 0:
+                return True, "schtasks_ok"
+            errors.append("schtasks_rc=%d" % r.returncode)
+        except Exception as exc:
+            errors.append("schtasks_exc:%s" % str(exc)[:100])
+    return False, "; ".join(errors) or "no_trigger_available"
+
+
+def read_result(path):
+    try:
+        raw = path.read_bytes()
+    except Exception:
+        return None
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    return raw.decode("utf-8", "replace")
 
 
 def main(argv):
@@ -162,46 +148,54 @@ def main(argv):
         emit("error", message="missing_instruction")
         return 2
 
-    root = Path(os.environ.get("XIAOYU_ROOT") or DEFAULT_ROOT)
-    outbox = Path(os.environ.get("XIAOYU_OUTBOX") or (root / "cloud-outbox"))
-    inbox = Path(os.environ.get("XIAOYU_INBOX") or (root / "cloud-inbox"))
+    bridge = Path(os.environ.get("XIAOYU_BRIDGE") or BRIDGE)
+    tasks_dir = Path(os.environ.get("XIAOYU_TASKS_DIR") or TASKS_DIR)
     task_id = os.environ.get("XIAOYU_TASK_ID") or uuid.uuid4().hex[:12]
-    timeout_s = float(os.environ.get("XIAOYU_TIMEOUT_S", "1200"))
-    poll_s = float(os.environ.get("XIAOYU_POLL_S", "20"))
+    timeout_s = float(os.environ.get("XIAOYU_TIMEOUT_S", "300"))
+    poll_s = float(os.environ.get("XIAOYU_POLL_S", "2"))
+    trigger_mode = os.environ.get("XIAOYU_TRIGGER", "auto")
+    if os.environ.get("XIAOYU_NO_WAKE") == "1":
+        trigger_mode = "none"
+
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+    result_path = tasks_dir / (task_id + ".txt")
+    spec = task_spec(task_id, instruction, result_path)
 
     try:
-        card = write_card(outbox, task_id, instruction, workdir)
+        msg_file = write_spec(bridge / "wake-msg.txt", spec)
     except Exception as exc:
-        emit("error", message="card_write_failed:" + str(exc)[:150])
+        emit("error", message="spec_write_failed:" + str(exc)[:150])
         return 1
 
-    wake = try_wake()
-
-    emit("thread.started", thread_id="xiaoyu-mailbox")
+    emit("thread.started", thread_id="xiaoyu-comms-v2")
     emit("turn.started")
-    emit("mailbox.note", task_id=task_id, card=str(card), wake=wake,
-         note="xiaoyu 无 CLI/无端口，走 cloud-outbox 收单、cloud-inbox 回件，cron 15 分钟轮询")
+
+    ok, detail = trigger(trigger_mode, bridge)
+    emit("wake.note", task_id=task_id, spec_file=str(msg_file),
+         result_path=str(result_path), trigger=detail, ok=ok,
+         note="comms-v2 legacy task 通道：写 wake-msg.txt，UIA 注入 Grok Bot，结果落 comms-tasks")
 
     deadline = time.time() + timeout_s
-    found = None
+    content = None
     while time.time() < deadline:
-        found = find_receipt(outbox, inbox, task_id)
-        if found:
+        content = read_result(result_path)
+        if content is not None and content.strip():
             break
         time.sleep(poll_s)
+        content = None
 
-    if found is None:
+    if content is None or not content.strip():
         emit("item.completed",
              item={"id": "item_0", "type": "agent_message",
-                   "text": "xiaoyu_no_receipt: 任务卡已投递 " + card.name
-                           + "，等待 %.0fs 未收到含 " % timeout_s + task_id + " 的回执。"})
-        emit("turn.completed", exit_code=124, receipt=None, wake=wake)
+                   "text": "xiaoyu_no_result: 任务单已注入 " + task_id
+                           + "（trigger=" + detail + "），等待 %.0fs 未收到 " % timeout_s
+                           + str(result_path) + "。"})
+        emit("turn.completed", exit_code=124, result_path=str(result_path), trigger=detail)
         return 124
 
-    path, text = found
     emit("item.completed",
-         item={"id": "item_0", "type": "agent_message", "text": text})
-    emit("turn.completed", exit_code=0, receipt=str(path), wake=wake)
+         item={"id": "item_0", "type": "agent_message", "text": content})
+    emit("turn.completed", exit_code=0, result_path=str(result_path), trigger=detail)
     return 0
 
 
