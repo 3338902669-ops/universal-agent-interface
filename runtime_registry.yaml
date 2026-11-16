@@ -1,0 +1,27 @@
+# UAI Runtime Registry
+# Add your agents here. Each entry needs: id, command.
+# type: native_cli (direct CLI binary) or python_adapter (needs python wrapper)
+#
+# Examples:
+runtimes:
+  - id: codex
+    command: codex
+    type: native_cli
+    description: OpenAI Codex CLI
+
+  - id: claude
+    command: claude
+    type: native_cli
+    description: Anthropic Claude Code
+
+  - id: dsh
+    command: python stage2/runtime_adapters/dsh_adapter.py
+    type: python_adapter
+    description: DeepSeek Harness (via adapter)
+
+  # Add your own agent here:
+  # - id: my-agent
+  #   command: /path/to/my/agent
+  #   type: native_cli
+  #   description: My custom agent
+  #   max_concurrent: 3

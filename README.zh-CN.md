@@ -34,6 +34,17 @@ python stage2/test_a2a_server.py               # 12/12
 
 完整套件（24 个套件 300+ 用例）与真 lab 端到端（A2A 请求 → 信封 → 中枢 → 真 runtime → 账本）见 [stage2/DEVELOPMENT.md](stage2/DEVELOPMENT.md)。
 
+## 接入自己的 agent（一行配置）
+
+```yaml
+# runtime_registry.yaml
+runtimes:
+  - id: my-agent
+    command: /path/to/my/agent
+```
+
+然后：`python demo.py` 查看路由和拆解。
+
 ## 组成
 
 | 层 | 路径 | 职责 |

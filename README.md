@@ -36,6 +36,17 @@ python stage2/test_a2a_server.py               # 12/12
 
 Full suite (24 suites, 300+ cases) and a real-lab end-to-end (A2A request → envelope → hub → real runtime → ledger) live in [`stage2/DEVELOPMENT.md`](stage2/DEVELOPMENT.md).
 
+## Add your own agent (one line)
+
+```yaml
+# runtime_registry.yaml
+runtimes:
+  - id: my-agent
+    command: /path/to/my/agent
+```
+
+Then: `python demo.py` to see it route and decompose tasks.
+
 ## What's inside
 
 | Layer | Path | What it does |
