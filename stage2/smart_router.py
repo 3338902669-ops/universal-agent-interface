@@ -111,6 +111,53 @@ class SmartRouter:
         data = {"agents": [p.to_dict() for p in self.agents.values()]}
         self.registry_path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
+    def load_stats_from_ledger(self, ledger_path: str, task_desc_map: dict = None):
+        """从 hub 账本提取历史任务结果，填充 AgentProfile.stats（自适应学习数据源）。
+
+        ledger_path: hub 账本 JSONL 路径
+        task_desc_map: 可选的 task_id -> task_description 映射（如果账本里没有描述）
+        """
+        import json as _json
+        ledger = Path(ledger_path)
+        if not ledger.exists():
+            return {"loaded": 0, "error": "ledger_not_found"}
+        
+        task_results = {}  # agent_id -> [{state, task_id}]
+        task_descs = task_desc_map or {}
+        
+        for line in open(ledger, encoding="utf-8", errors="replace"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = _json.loads(line)
+            except:
+                continue
+            
+            rid = r.get("record", "")
+            tid = r.get("task_id", "")
+            iid = r.get("interface_id", "")
+            state = r.get("state", "")
+            
+            if rid == "TASK_STATE" and iid and state in ("SUCCEEDED", "FAILED", "TIMED_OUT"):
+                task_results.setdefault(iid, []).append({
+                    "task_id": tid, "state": state, "task_type": self._extract_task_type(task_descs.get(tid, tid))
+                })
+        
+        loaded = 0
+        for agent_id, results in task_results.items():
+            if agent_id not in self.agents:
+                continue
+            profile = self.agents[agent_id]
+            for r in results:
+                success = r["state"] == "SUCCEEDED"
+                profile.record_result(r["task_type"], success, 0)  # duration unknown
+                loaded += 1
+        
+        self._save()
+        return {"loaded": loaded, "agents_updated": len(task_results)}
+
+
     def _extract_task_type(self, task_desc: str) -> str:
         """从任务描述提取任务类型（简化版：关键词匹配）。
         生产版本可换成 LLM 分类。"""
