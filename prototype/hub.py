@@ -1337,6 +1337,27 @@ class Hub:
                 },
             )
             return
+        # 未到终态的任务不得判「通过」：没有产出就宣布成功是伪证。
+        # 允许「不通过 / 作废 / 未核」——那是记录问题，不是宣布完成。
+        if task.state not in TERMINAL_STATES and verdict in ("通过", "带注通过"):
+            self.record(
+                "VERDICT_REJECTED",
+                task_id=task_id,
+                reason="task_not_terminal",
+                checker=request.get("checker", "unknown"),
+                execution_state=task.state,
+            )
+            self.json_response(
+                msg,
+                {
+                    "ok": False,
+                    "reason": "task_not_terminal",
+                    "execution_state": task.state,
+                    "allowed_verdicts": ["不通过", "未核", "作废"],
+                },
+            )
+            return
+
         if verdict == "未核":
             missing = [
                 key
