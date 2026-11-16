@@ -51,8 +51,22 @@ async def submit(
     approval: dict | None = None,
     contract_version: str = "1.0",
     connect_timeout_s: float = 10.0,
+    inject_memory: bool = True,
 ) -> dict:
     """投递一个 A2A 请求，返回 {envelope, hub_response, task_id, accepted}。"""
+    # I-3: 团队记忆自动注入——派发前查图谱，把相关历史事实注入 instruction
+    if inject_memory:
+        try:
+            from team_memory import TeamMemoryBridge
+            _mem = TeamMemoryBridge()
+            parts = request.get("message", {}).get("parts", [])
+            for part in parts:
+                if isinstance(part, dict) and part.get("text"):
+                    part["text"] = _mem.inject_context(part["text"], created_by)
+            _mem.close()
+        except Exception:
+            pass  # 记忆注入失败不阻塞派发
+
     envelope = inbound.envelope_from_a2a(
         request,
         created_by=created_by,
