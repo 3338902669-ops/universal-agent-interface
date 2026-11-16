@@ -1138,6 +1138,85 @@ class Hub:
             **extra,
         )
 
+    def _run_three_layer(
+        self, task: "Task", request: dict[str, Any]
+    ) -> dict[str, Any]:
+        """三层验收（I-4）：从任务信封的 output_contract 与实际产物执行验证。
+
+        返回 {"enforced": bool, "result": dict|None, "reject": str|None}
+        - enforced: 信封里是否带 output_contract（带则失败即拒绝裁定）
+        - reject:   非空表示应拒绝本次裁定，值为拒绝原因
+        """
+        params = (task.envelope or {}).get("params") or {}
+        contract = params.get("output_contract") or {}
+        enforce_flag = bool(request.get("enforce_three_layer"))
+        enforced = bool(contract) or enforce_flag
+        if not contract and not enforce_flag:
+            return {"enforced": False, "result": None, "reject": None}
+
+        import sys as _sys
+
+        stage2 = Path(__file__).resolve().parent.parent / "stage2"
+        if str(stage2) not in _sys.path:
+            _sys.path.insert(0, str(stage2))
+        try:
+            from three_layer_verdict import ThreeLayerVerdict
+        except Exception as exc:  # 模块不可用时不阻断旧路径
+            return {"enforced": False, "result": None,
+                    "reject": None, "load_error": "three_layer_unavailable:%s" % exc}
+
+        # 读取实际产物
+        output: dict[str, Any] = {}
+        pointer = task.result_pointer or {}
+        load_error = None
+        if pointer:
+            try:
+                path = file_uri_to_path(pointer.get("uri", ""))
+                raw = path.read_bytes()
+                if "json" in str(pointer.get("media_type", "")):
+                    try:
+                        parsed = json.loads(raw.decode("utf-8", errors="replace"))
+                        output = parsed if isinstance(parsed, dict) else {"value": parsed}
+                    except Exception:
+                        output = {"text": raw.decode("utf-8", errors="replace")}
+                else:
+                    output = {"text": raw.decode("utf-8", errors="replace")}
+            except Exception as exc:
+                load_error = "result_unreadable:%s" % exc
+
+        verdict_word = request.get("verdict", "")
+        checker = request.get("checker") or "unknown"
+        implementer = task.selected_interface or "unknown"
+
+        v = ThreeLayerVerdict({"output_contract": contract})
+        try:
+            result = v.execute_all(
+                output,
+                {},
+                request.get("run_outputs") or [],
+                verdict_word,
+                checker,
+                implementer,
+            )
+        except Exception as exc:
+            return {"enforced": enforced, "result": None,
+                    "reject": "three_layer_error:%s" % exc}
+
+        if load_error:
+            result["load_error"] = load_error
+
+        reject = None
+        if enforced:
+            if not result["layer1"]["pass"]:
+                reject = "layer1_deterministic_failed"
+            elif result["layer2"].get("pass") is False:
+                reject = "layer2_consistency_below_threshold"
+            elif not result["layer3"]["pass"]:
+                reject = ("verifier_is_implementer"
+                          if not result["layer3"]["independent"]
+                          else "verdict_not_canonical")
+        return {"enforced": enforced, "result": result, "reject": reject}
+
     def _validate_pointer(
         self, pointer: Any
     ) -> tuple[bool, str]:
@@ -1274,10 +1353,35 @@ class Hub:
                     },
                 )
                 return
+        # I-4: 三层验收（信封带 output_contract 时强制，否则仅记录建议值）
+        if task.state in TERMINAL_STATES:
+            three_layer = self._run_three_layer(task, request)
+            if three_layer.get("reject"):
+                self.record(
+                    "VERDICT_REJECTED",
+                    task_id=task_id,
+                    reason=three_layer["reject"],
+                    checker=request.get("checker", "unknown"),
+                    three_layer=three_layer.get("result"),
+                )
+                self.json_response(
+                    msg,
+                    {
+                        "ok": False,
+                        "reason": three_layer["reject"],
+                        "three_layer": three_layer.get("result"),
+                    },
+                )
+                return
+        else:
+            three_layer = {"enforced": False, "result": None, "reject": None}
+
         record = self.record(
             "VERDICT",
             task_id=task_id,
             verdict=verdict,
+            three_layer=three_layer.get("result"),
+            three_layer_enforced=three_layer.get("enforced", False),
             checker=request.get("checker", "unknown"),
             evidence_level=request.get("evidence_level", "E3"),
             deterministic_check=request.get("deterministic_check"),

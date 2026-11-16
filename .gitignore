@@ -46,3 +46,6 @@ prototype/hub.py.bak-*
 stage2/%SystemDrive%/
 stage2/_apn_work/
 stage2/data/
+
+# 端到端测试环境（含 token，不入库）
+prototype_clean/

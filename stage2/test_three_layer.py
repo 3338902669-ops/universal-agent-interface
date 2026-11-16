@@ -31,6 +31,12 @@ def main():
     l1b = v.layer1_deterministic(output_bad, artifacts)
     check("3LV-L1 forbidden content detected", l1b["pass"] is False, str(l1b))
 
+
+    # Layer 1: forbidden must not false-positive on longer words (Maat 37% class)
+    l1c = v.layer1_deterministic({"secretary": "alice", "secrets": "none"}, artifacts)
+    check("3LV-L1 forbidden word-boundary no false positive", l1c["pass"] is True, str(l1c))
+    l1d = v.layer1_deterministic({"password": "x"}, artifacts)
+    check("3LV-L1 forbidden exact hit detected", l1d["pass"] is False, "")
     # Layer 2: consistency - all same
     outputs_same = [{"r": "ok"}, {"r": "ok"}, {"r": "ok"}]
     l2 = v.layer2_consistency(outputs_same)

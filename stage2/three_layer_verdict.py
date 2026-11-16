@@ -12,6 +12,25 @@ class ThreeLayerVerdict:
     def __init__(self, envelope: dict):
         self.contract = envelope.get("output_contract") or {}
 
+    @staticmethod
+    def _forbidden_hit(pattern: str, text: str) -> bool:
+        """禁止项匹配：纯标识符用词边界+忽略大小写，避免 secret 误伤 secrets。
+
+        含正则元字符的模式按原始正则处理，保留高级用法。
+        """
+        if not pattern:
+            return False
+        if re.fullmatch(r"[A-Za-z0-9_\-]+", pattern):
+            try:
+                return re.search(r"(?<![A-Za-z0-9_])" + re.escape(pattern) + r"(?![A-Za-z0-9_])",
+                                 text, re.IGNORECASE) is not None
+            except re.error:
+                return False
+        try:
+            return re.search(pattern, text) is not None
+        except re.error:
+            return False
+
     def layer1_deterministic(self, output: dict, artifacts: dict) -> dict:
         results = {"pass": True, "checks": []}
         contract = self.contract
@@ -37,9 +56,10 @@ class ThreeLayerVerdict:
                 results["checks"].append({"check": inv[:50], "pass": False, "detail": str(e)[:100]})
         output_str = json.dumps(output, ensure_ascii=False)
         for pattern in contract.get("forbidden", []):
-            if re.search(pattern, output_str):
+            if self._forbidden_hit(str(pattern), output_str):
                 results["pass"] = False
-                results["checks"].append({"check": "forbidden:" + pattern[:30], "pass": False})
+                results["checks"].append(
+                    {"check": "forbidden:" + str(pattern)[:30], "pass": False})
         return results
 
     def layer2_consistency(self, run_outputs: list) -> dict:
