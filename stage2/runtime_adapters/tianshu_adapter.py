@@ -56,6 +56,25 @@ def find_rivet() -> str | None:
 
 
 def _inject_api_key(env: dict) -> None:
+    """rivet 需要 provider 对应的 key；本机它们只在 HKCU 注册表里。
+    默认 provider 已切到 opnai（luna），因此两个 key 都尝试补齐。
+    """
+    wanted = ("OPNAI_API_KEY", "DEEPSEEK_API_KEY")
+    for name in wanted:
+        if env.get(name):
+            continue
+        try:
+            import winreg  # type: ignore
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+                v, _ = winreg.QueryValueEx(k, name)
+            if v:
+                env[name] = v
+        except Exception:
+            pass
+    return None
+
+def _inject_api_key_legacy(env: dict) -> None:
+
     """rivet 需要 DEEPSEEK_API_KEY；本机它只在 HKCU 注册表里。"""
     if env.get("DEEPSEEK_API_KEY"):
         return

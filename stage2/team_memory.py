@@ -25,6 +25,16 @@ def _looks_like_credential(text: str) -> bool:
     return any(m in low for m in CREDENTIAL_MARKERS)
 
 
+
+
+def _now_iso_source():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+def _now_iso_source():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
 class TeamMemoryBridge:
     def __init__(self, uri="bolt://127.0.0.1:7687", user="neo4j", password="graphiti",
                  max_facts=5, connect_timeout_s=1.5, cache_ttl_s=300, circuit_s=60):
@@ -170,7 +180,7 @@ class TeamMemoryBridge:
         block += "[团队记忆结束]\n\n"
         return block + task_desc
 
-    def record_outcome(self, agent_id, task_desc, success, verdict):
+    def record_outcome(self, agent_id, task_desc, success, verdict, source="stage2.team_memory"):
         drv = self._get_driver()
         summary = "%s executed '%s' result: %s (verdict: %s)" % (
             agent_id, task_desc[:100], "success" if success else "fail", verdict)
@@ -178,8 +188,10 @@ class TeamMemoryBridge:
             with drv.session() as session:
                 session.run(
                     "CREATE (e:Episodic {name: $name, summary: $summary, "
-                    "created_at: datetime(), group_id: 'neo4j'})",
-                    {"name": agent_id + " task outcome", "summary": summary},
+                    "created_at: datetime(), reference_time: $rt, "
+                    "source: $src, group_id: 'neo4j'})",
+                    {"name": agent_id + " task outcome", "summary": summary,
+                     "rt": _now_iso_source(), "src": source},
                 )
         except Exception:
             pass

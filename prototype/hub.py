@@ -95,6 +95,9 @@ class Hub:
         self.default_lease_seconds = lease_seconds
         self.ledger_path = base / "data" / "ledger.jsonl"
         self.ledger = AppendOnlyJsonl(self.ledger_path)
+        # 心跳是连接保活，不是审计凭证：单独落盘，不进哈希链主账本
+        self.heartbeat_path = base / "data" / "heartbeats.jsonl"
+        self.heartbeat_log = AppendOnlyJsonl(self.heartbeat_path)
         from ledger_seal import LedgerSealer
         self.sealer = LedgerSealer(self.ledger_path, base / "data" / "chain-heads.jsonl")
         self.connection_log = base / "logs" / "hub-connection.jsonl"
@@ -149,6 +152,12 @@ class Hub:
         # 哈希链接线（2026-11-15）：写前 seal，篡改/删链可检出；历史未链化记录渐进兼容
         self.ledger.append(self.sealer.seal(value))
         return value
+
+    def record_heartbeat(self, interface_id: str) -> None:
+        """心跳只写独立日志：不封链、不进主账本。
+        主账本要留的是状态变更（注册/失联/裁定）与业务事实。
+        """
+        self.heartbeat_log.append({"ts": now_iso(), "interface_id": interface_id})
 
     def load_token_hashes(self) -> dict[str, str]:
         if not self.token_hashes_path.exists():
@@ -448,7 +457,7 @@ class Hub:
             self.json_response(msg, {"ok": False, "reason": "unauthorized"})
             return
         session.last_heartbeat = time.monotonic()
-        self.record("INTERFACE_HEARTBEAT", interface_id=interface_id)
+        self.record_heartbeat(interface_id)
         if session.stale or not session.active:
             self.json_response(
                 msg,
