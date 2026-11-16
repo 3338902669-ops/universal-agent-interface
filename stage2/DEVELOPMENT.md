@@ -14,10 +14,10 @@
 | `a2a_server.py` | 只读 HTTP：`/.well-known/agent-card.json`、`/tasks`、`/tasks/<id>` | `test_a2a_server.py` **12/12** |
 | `inbound.py` | A2A 请求 → 契约 v1 信封（幂等键派生、附件指纹、凭据拦截、**wire_format 版本裁剪**） | `test_io.py` **27/27** |
 | `event_bridge.py` | 账本增量 → A2A 事件 → 只追加出站信箱 | `test_bridge_joins.py` **34/34** |
-| `unified.py` | 两轴状态 + 证据等级×载荷 + 审批校验 + **核验独立性（C-05）** + **证据只认账本（C-04）** | `test_unified.py` **33/33**、`test_p1_batch.py` 中 C-04/C-05 共 16 条 |
+| `unified.py` | 两轴状态 + 证据等级×载荷 + 审批校验 + **核验独立性（C-05）** + **证据只认账本（C-04）** + **三轮连续失败阻塞（B-01，`RoundsTracker`）** | `test_unified.py` **33/33**、`test_b01_rounds.py` **25/25**、`test_p1_batch.py` 中 C-04/C-05 共 16 条 |
 | `identity.py` | LocalToken / OIDC / mTLS / Static 可插拔；无验证器不得升 `authenticated` | `test_identity.py` **10/10** |
 | `reassign.py` | 改派：围栏+1、attempt+1、必须带原因、终态不可改派 | `test_p1_batch.py` 中 A-11 共 12 条 |
-| `hub_singleton.py` | 中枢单实例：OS 文件锁 + 持有者校验 + 接管留痕 | `test_a09_singleton.py` **13/13** |
+| `hub_singleton.py` | 中枢单实例：**OS 独占锁**（`msvcrt.locking`/`flock`）裁决 + 持有者校验 + 接管留痕落盘 + 无写权拒绝派发 | `test_a09_singleton.py` **25/25**（含 8 进程真并发） |
 | `ledger_chain.py` | 只追加账本哈希链：篡改/删链可检出 | `test_p2_batch.py` **32/32**（含 B-03/B-04） |
 | `inbound_bridge.py` | A2A 请求 → 信封 → `hub.submit` 闭环 | `test_a02_inbound.py` **8/8**（需真 lab） |
 | `check-cross-repo-vocab.py` | 跨仓词表一致性（读三仓真实文件） | **17 项 0 漂移** |
@@ -27,7 +27,7 @@
 | `identity.py` OidcVerifier | **JWT 真验签**（RS256/ES256+exp/nbf/iss/aud+kid 严格） | `test_eoidc_jwt.py` **8/8** |
 | `a2a_server.py` _stream_events | **SSE 事件流出站**（/tasks/<id>/events） | `test_a07_sse_stream.py` **3/3**（需 lab） |
 
-合计 **259 条用例**（本地全绿）。`test_a02_inbound.py` 需要真 nats+hub lab；CI 里由
+合计 **296 条用例**（本地全绿）。2026-11-17 追加 A-09 真并发 12 条（`test_a09_singleton.py` 13→25）与 B-01 轮次 25 条（`test_b01_rounds.py` 新增），原 259 条基线未变。`test_a02_inbound.py` 需要真 nats+hub lab；CI 里由
 `../bench/lab.py` 先把 lab 拉起来**真跑**（workflow 里有硬门：该套件若被 skip 即判红）。
 协议侧另有 `../protocol/tests/conformance/` **22 项**；`../protocol/GAR-OPEN-ITEMS-REF.md` 记录了
 C-06~C-10 这些**必须由 GAR 侧闭合**的项及验收口径。

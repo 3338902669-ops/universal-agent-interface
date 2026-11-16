@@ -75,10 +75,141 @@ def assert_writable_verdict(value: str) -> str:
     return value
 
 
+# ---------- B-01：三轮「同一个」阻塞原因才算阻塞 ----------
+BLOCKED_AFTER_ROUNDS = 3
+
+
+def blocker_fingerprint(reasons) -> str:
+    """把一轮核验的阻塞原因压成稳定的指纹（顺序无关、去重）。
+
+    只记"哪些检查没过"的集合，不记文本细节——比较需要的是身份，不是措辞。
+    空原因给 `unspecified`：三轮都算不出原因同样阻塞，但不能伪造成具体原因。
+    """
+    if isinstance(reasons, str):
+        return reasons.strip() or "unspecified"
+    items = sorted({str(r).strip() for r in (reasons or []) if str(r).strip()})
+    if not items:
+        return "unspecified"
+    return hashlib.sha256("|".join(items).encode("utf-8")).hexdigest()[:16]
+
+
+class RoundsTracker:
+    """核验轮次计数器（B-01 的"轮次"，不是散落的布尔/整数）。
+
+    旧实现只有一个 `failed_verifications >= 3` 的判断：调用方自己数数，
+    模块既不知道这些失败**是不是同一件事**，也不知道中间有没有成功过。
+    结果是"三个不同毛病累计三次"被当成死锁，真正卡死的任务反而可能因为
+    每轮换个说法而永远不阻塞。
+
+    规则（fail-closed）：
+      1. **连续 3 轮同一个阻塞原因** → `blocked`；
+      2. 原因变了 → 连续计数从 1 重新开始（前一个原因没连着卡住，不算死锁）；
+      3. 任意一轮通过 → 连续计数清零，阻塞解除；
+      4. **已经阻塞后，换原因不能洗白**：解除只有两条路——真的通过一轮，或
+         人显式 `clear_block()`（留审计记录）。
+      5. 空原因按 `unspecified` 计：三轮都说不清原因也算阻塞，但不编造原因。
+
+    `as_record()` / `from_record()` 用于落账本：轮次状态必须可持久化，
+    否则进程重启后计数器归零，三轮永远数不满。
+    """
+
+    def __init__(self, *, blocked_after: int = BLOCKED_AFTER_ROUNDS):
+        self.blocked_after = int(blocked_after)
+        self.rounds = 0             # 累计轮次（不因成功而清零）
+        self.consecutive = 0        # 当前原因连续失败的轮数
+        self.blocker: str | None = None
+        self.blocked = False
+        self.blocked_reason: str | None = None
+        self.history: list[dict] = []
+
+    # ---- 记录 ----
+    def record_failure(self, blocker=None, *, note: str | None = None) -> dict:
+        fp = blocker_fingerprint(blocker)
+        self.rounds += 1
+        if fp == self.blocker:
+            self.consecutive += 1
+        else:
+            self.blocker = fp
+            self.consecutive = 1
+        if not self.blocked and self.consecutive >= self.blocked_after:
+            self.blocked = True
+            self.blocked_reason = "consecutive_rounds:%d:%s" % (self.blocked_after, fp)
+        self.history.append({
+            "round": self.rounds, "outcome": "failed", "blocker": fp,
+            "consecutive": self.consecutive, "blocked": self.blocked,
+            "note": note,
+        })
+        return self.snapshot()
+
+    def record_success(self, *, note: str | None = None) -> dict:
+        self.rounds += 1
+        was_blocked = self.blocked
+        self.consecutive = 0
+        self.blocker = None
+        self.blocked = False
+        self.blocked_reason = None
+        self.history.append({
+            "round": self.rounds, "outcome": "passed", "blocker": None,
+            "consecutive": 0, "blocked": False, "unblocked": was_blocked,
+            "note": note,
+        })
+        return self.snapshot()
+
+    def clear_block(self, reason: str) -> dict:
+        """人工解除阻塞：必须给理由，且留审计（不是静默把 blocked 置 False）。"""
+        if not reason or not str(reason).strip():
+            raise ModelError("clear_block_requires_reason")
+        if not self.blocked:
+            raise ModelError("not_blocked")
+        prev = self.blocked_reason
+        self.blocked = False
+        self.blocked_reason = None
+        self.consecutive = 0
+        self.blocker = None
+        self.history.append({
+            "round": self.rounds, "outcome": "cleared_by_human",
+            "previous_blocked_reason": prev, "note": str(reason).strip(),
+        })
+        return self.snapshot()
+
+    # ---- 视图 / 持久化 ----
+    @property
+    def governance_state(self) -> str:
+        return "blocked" if self.blocked else "active"
+
+    def snapshot(self) -> dict:
+        return {
+            "rounds": self.rounds,
+            "consecutive": self.consecutive,
+            "blocker": self.blocker,
+            "blocked": self.blocked,
+            "blocked_reason": self.blocked_reason,
+            "governance_state": self.governance_state,
+        }
+
+    def as_record(self) -> dict:
+        rec = self.snapshot()
+        rec["blocked_after"] = self.blocked_after
+        rec["history"] = list(self.history)
+        return rec
+
+    @classmethod
+    def from_record(cls, rec: dict) -> "RoundsTracker":
+        t = cls(blocked_after=int((rec or {}).get("blocked_after", BLOCKED_AFTER_ROUNDS)))
+        t.rounds = int(rec.get("rounds", 0) or 0)
+        t.consecutive = int(rec.get("consecutive", 0) or 0)
+        t.blocker = rec.get("blocker")
+        t.blocked = bool(rec.get("blocked", False))
+        t.blocked_reason = rec.get("blocked_reason")
+        t.history = list(rec.get("history") or [])
+        return t
+
+
 # ---------- 治理状态派生 ----------
 def derive_governance_state(execution_state: str, verdict: str | None = None,
                             blocked_reason: str | None = None,
-                            failed_verifications: int = 0) -> str:
+                            failed_verifications: int = 0, *,
+                            rounds=None) -> str:
     """执行状态 + 裁定 → 治理状态。这是两根轴之间的唯一桥。
 
     规则：
@@ -93,8 +224,14 @@ def derive_governance_state(execution_state: str, verdict: str | None = None,
     """
     if execution_state not in EXECUTION_STATES:
         raise ModelError("unknown_execution_state: %r" % (execution_state,))
-    # B-01：三轮核验失败即阻塞（对应 AO 的 C1/C2）
-    if failed_verifications >= 3:
+    # B-01：三轮「连续同一原因」核验失败即阻塞（对应 AO 的 C1/C2）
+    #   `rounds`（RoundsTracker）是权威路径：它知道失败是不是同一件事、
+    #   中间有没有成功过、以及轮次状态如何落账本；
+    #   `failed_verifications` 只是旧调用方传进来的裸计数，无法区分原因，
+    #   保留仅为兼容，新代码一律传 `rounds=`。
+    if rounds is not None and getattr(rounds, "blocked", False):
+        return "blocked"
+    if rounds is None and failed_verifications >= 3:
         return "blocked"
     if blocked_reason:
         return "blocked"
@@ -120,14 +257,15 @@ def derive_governance_state(execution_state: str, verdict: str | None = None,
     return "closed" if v == "作废" else "active"
 
 
-def project_state(execution_state: str, verdict: str | None = None) -> dict:
+def project_state(execution_state: str, verdict: str | None = None, *,
+                  rounds=None) -> dict:
     """对外投影：A2A 状态 + 两根轴 + 必要的「待核验」标记。"""
     if execution_state not in EXECUTION_TO_A2A:
         raise ModelError("unknown_execution_state: %r" % (execution_state,))
     out = {
         "a2a_state": EXECUTION_TO_A2A[execution_state],
         "execution_state": execution_state,
-        "governance_state": derive_governance_state(execution_state, verdict),
+        "governance_state": derive_governance_state(execution_state, verdict, rounds=rounds),
     }
     if execution_state == "SUCCEEDED":
         out["message"] = (assert_writable_verdict(canonicalize_verdict(verdict))
