@@ -1,5 +1,7 @@
 """Agent negotiation semantics (2026-11-16)."""
 from __future__ import annotations
+
+import skill_taxonomy
 import json, time
 from pathlib import Path
 
@@ -73,13 +75,13 @@ class AgentNegotiator:
         if self.current_load >= self.max_concurrent:
             return NegotiationResponse(NegotiationResponse.REJECT, self.agent_id, reason="capacity_full: %d/%d" % (self.current_load, self.max_concurrent))
         if required_skills:
-            has_any = any(s.lower() in self.skills for s in required_skills)
+            has_any = any(skill_taxonomy.matches_any(str(s), self.skills) for s in required_skills)
             if not has_any and self.skills:
                 return NegotiationResponse(NegotiationResponse.REJECT, self.agent_id, reason="skill_mismatch: needs %s, have %s" % (required_skills, sorted(self.skills)))
         if required_skills:
-            matched = [s for s in required_skills if s.lower() in self.skills]
+            matched = [s for s in required_skills if skill_taxonomy.matches_any(str(s), self.skills)]
             if matched and len(matched) < len(required_skills):
-                missing = [s for s in required_skills if s.lower() not in self.skills]
+                missing = [s for s in required_skills if not skill_taxonomy.matches_any(str(s), self.skills)]
                 return NegotiationResponse(NegotiationResponse.COUNTER_OFFER, self.agent_id, reason="partial_match: have %s, missing %s" % (matched, missing), conditions=["need %s support" % m for m in missing])
         return NegotiationResponse(NegotiationResponse.ACCEPT, self.agent_id)
 

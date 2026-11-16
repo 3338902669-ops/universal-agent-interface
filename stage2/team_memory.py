@@ -16,6 +16,15 @@ import os
 import time
 
 
+# 与 inbound.py 的信封凭据检查保持一致：这些字样不得进入指令
+CREDENTIAL_MARKERS = ("api_key", "apikey", "password", "secret", "token=")
+
+
+def _looks_like_credential(text: str) -> bool:
+    low = text.lower()
+    return any(m in low for m in CREDENTIAL_MARKERS)
+
+
 class TeamMemoryBridge:
     def __init__(self, uri="bolt://127.0.0.1:7687", user="neo4j", password="graphiti",
                  max_facts=5, connect_timeout_s=1.5, cache_ttl_s=300, circuit_s=60):
@@ -28,6 +37,7 @@ class TeamMemoryBridge:
         self._circuit_s = circuit_s
         self._cache = {}
         self._circuit_open_until = 0.0
+        self.last_dropped_facts = 0
 
     # ---------- infrastructure ----------
 
@@ -144,6 +154,12 @@ class TeamMemoryBridge:
                 if s and s not in relevant:
                     relevant.append(s[:200])
             self._cache_put(task_desc, relevant)
+
+        # 过滤掉含凭据样字样的记忆：既不外泄，也避免撞信封凭据检查
+        dropped = [r for r in relevant if _looks_like_credential(r)]
+        self.last_dropped_facts = len(dropped)
+        if dropped:
+            relevant = [r for r in relevant if not _looks_like_credential(r)]
 
         if not relevant:
             return task_desc

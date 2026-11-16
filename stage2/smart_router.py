@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+import skill_taxonomy
+
 import json
 import math
 import os
@@ -221,7 +223,7 @@ class SmartRouter:
             breakdown["speed_score"] = None
 
         # 加权总分：能力匹配 40% + 历史成功率 30% + 负载 20% + 速度 10%
-        type_bonus = 0.3 if task_type in profile.skills else 0.0
+        type_bonus = 0.3 if skill_taxonomy.matches_any(task_type, profile.skills) else 0.0
         breakdown["type_bonus"] = round(type_bonus, 3)
         score = (skill_score * 0.4 +
                  hist_score * 0.3 +

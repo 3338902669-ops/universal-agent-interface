@@ -20,6 +20,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import skill_taxonomy
+
 
 class DecomposerError(ValueError):
     pass
@@ -108,7 +110,7 @@ class TaskDecomposer:
         subtasks = []
         for i, t in enumerate(template):
             task_type = t["type"]
-            routable = task_type in self.available_skills
+            routable = skill_taxonomy.matches_any(task_type, self.available_skills)
             subtasks.append({
                 "index": i,
                 "description": t["desc"],
