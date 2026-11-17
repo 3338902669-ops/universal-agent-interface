@@ -1570,30 +1570,43 @@ class Hub:
         self.json_response(msg, {"ok": False, "reason": "unknown_debug_action"})
 
     async def on_reconcile(self, msg: Msg) -> None:
+        # 性能与正确性修复（2026-11-18）：原实现是「每个 task 扫一遍全账本」，
+        # 复杂度 O(tasks x ledger)。账本 5500+ 行时单次调用会把 hub 的事件循环
+        # **整段堵死**，于是 reconcile 超时的同时 submit/claim 也全部超时 ——
+        # 进程、锁、心跳全绿，中枢实际已瘫痪（今天「假在线」的真正主因）。
+        # 现在改成一次遍历建索引，再逐 task 比对。
+        seq_by_task: dict[str, set[int]] = {}
+        for row in self.ledger.records():
+            if row.get("record") != "TASK_EVENT":
+                continue
+            task_id = row.get("task_id")
+            if task_id is None:
+                continue
+            try:
+                seq = int(row["seq"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            seq_by_task.setdefault(str(task_id), set()).add(seq)
+
         gaps: list[dict[str, Any]] = []
         for task in self.tasks.values():
-            seqs = sorted(
-                {
-                    int(row["seq"])
-                    for row in self.ledger.records()
-                    if row.get("record") == "TASK_EVENT"
-                    and row.get("task_id") == task.task_id
-                }
-            )
+            seqs = seq_by_task.get(task.task_id)
             if not seqs:
                 continue
-            expected = list(range(1, max(seqs) + 1))
-            missing = sorted(set(expected) - set(seqs))
+            highest = max(seqs)
+            missing = [seq for seq in range(1, highest + 1) if seq not in seqs]
             if missing:
-                gaps.append({"task_id": task.task_id, "missing": missing})
+                gaps.append({"task_id": task.task_id, "missing": missing[:50],
+                             "missing_count": len(missing)})
         self.record(
             "RECONCILIATION",
             gap_count=len(gaps),
-            gaps=gaps,
+            gaps=gaps[:50],
             frequency_s=300,
         )
-        self.json_response(msg, {"ok": True, "gap_count": len(gaps), "gaps": gaps})
+        self.json_response(msg, {"ok": True, "gap_count": len(gaps), "gaps": gaps[:50]})
 
+        # 保证上面这段不会在异常时静默吞掉
     async def run(self) -> None:
         await self.connect()
 
