@@ -133,12 +133,20 @@ const PANEL_CSS = "/* UAI 看板 · 设计令牌与样式（唯一源）\n * 生
           : null);
     }
 
-    function PanelIcon() {
+    /**
+     * 侧栏入口图标。DSH 的 sidebar.panellist 会给条目传 { size, active }，
+     * 用 active 做选中态（颜色由 CSS 的 currentColor 决定，不写死色值）。
+     */
+    function PanelIcon(props) {
+      const size = (props && props.size) || 14;
+      const active = Boolean(props && props.active);
       return h("span", {
         "aria-hidden": "true",
         style: {
-          display: "inline-block", width: "14px", height: "14px",
-          border: "1.5px solid currentColor", borderRadius: "3px",
+          display: "inline-block", width: size + "px", height: size + "px",
+          border: (active ? "2px" : "1.5px") + " solid currentColor",
+          borderRadius: "3px",
+          opacity: active ? 1 : 0.75,
         },
       });
     }
@@ -210,8 +218,10 @@ const PANEL_CSS = "/* UAI 看板 · 设计令牌与样式（唯一源）\n * 生
       injectStyle();
       reg(ctx, "sidebar.panellist", () =>
         ctx.slots.register({ name: "sidebar.panellist", id: PANEL_ID, order: 5, label: () => "UAI 协作" }, PanelIcon), "sidebar.panellist");
+      // 关键：main 是 **keyed** slot，面板用 key 索引（不是 id）。
+      // 写成 id 时：侧栏入口能出现，但点进去 activePanelId 变了却没有内容 → “点击没反应”。
       reg(ctx, "main", () =>
-        ctx.slots.register({ name: "main", id: PANEL_ID }, Panel), "main");
+        ctx.slots.register({ name: "main", key: PANEL_ID }, Panel), "main");
       reg(ctx, "tool.call.toolview", () =>
         ctx.slots.register({ name: "tool.call.toolview", key: "uai_status" }, statusCard), "tool.call.toolview/uai_status");
       reg(ctx, "tool.call.toolview", () =>

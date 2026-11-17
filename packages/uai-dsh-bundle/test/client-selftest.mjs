@@ -87,6 +87,9 @@ check("注册了 3 类 slot / 4 个注册", registrations.length === 4, "count="
 const names = registrations.map((r) => r.options.name);
 check("sidebar.panellist 入口存在", names.indexOf("sidebar.panellist") >= 0);
 check("main 面板存在", names.indexOf("main") >= 0);
+check("main 用 keyed slot 的 key（写成 id 会「点击没反应」）",
+  registrations.some((r) => r.options.name === "main" && r.options.key === "uai-collab" && !("id" in r.options)),
+  JSON.stringify(registrations.filter((r) => r.options.name === "main").map((r) => r.options)));
 const viewKeys = registrations.filter((r) => r.options.name === "tool.call.toolview").map((r) => r.options.key);
 check("tool.call.toolview 覆盖 uai_status 与 uai_detect",
   viewKeys.indexOf("uai_status") >= 0 && viewKeys.indexOf("uai_detect") >= 0, viewKeys.join(","));
