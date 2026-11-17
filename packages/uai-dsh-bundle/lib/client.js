@@ -170,6 +170,43 @@ window.__ModuleLoader__.load({
           : null);
     }
 
+
+    function StatusCard(props) {
+      const T2 = T;
+      const phase = props && props.phase;
+      const block = props && props.block;
+      const result = (block && block.result) || null;
+      const value = (result && result.value) || result || null;
+      const ok = value && value.ok === true;
+      const label = phase === "preparing" ? "调用中" : phase === "start" ? "执行中" : ok ? "完成" : "失败";
+      const color = phase === "preparing" || phase === "start" ? T2.amber : ok ? T2.green : T2.red;
+      const cells = [];
+      if (ok) {
+        cells.push(["中枢", value.hub_held ? "运行中" : "未运行", value.hub_held ? T2.green : T2.red]);
+        cells.push(["席位", String(value.seats_running) + "/" + String(value.seats), T2.fg1]);
+        cells.push(["监督", String(value.supervisor), value.supervisor === 1 ? T2.green : T2.amber]);
+      }
+      return h("div", {
+        style: {
+          border: "1px solid " + T2.line, background: T2.bg1, color: T2.fg1,
+          fontFamily: T2.sans, fontSize: T2.body, padding: "8px 12px",
+        },
+      },
+        h("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: cells.length ? "6px" : "0" } },
+          h("i", { style: { width: "6px", height: "6px", borderRadius: "50%", background: color } }),
+          h("span", { style: { fontWeight: 600 } }, "UAI 常驻面"),
+          h("span", { style: { marginLeft: "auto", fontSize: T2.micro, letterSpacing: ".1em", textTransform: "uppercase", color: color } }, label)),
+        cells.length
+          ? h("div", { style: { display: "flex", gap: "16px" } },
+              cells.map((cell) => h("div", { key: cell[0], style: { display: "flex", gap: "6px", alignItems: "baseline" } },
+                h("span", { style: { fontSize: T2.micro, letterSpacing: ".12em", textTransform: "uppercase", color: T2.fg2 } }, cell[0]),
+                h("span", { style: { color: cell[2], fontVariantNumeric: "tabular-nums" } }, cell[1]))))
+          : null,
+        !ok && value && value.summary
+          ? h("div", { style: { fontSize: T2.small, color: T2.fg2 } }, String(value.summary))
+          : null);
+    }
+
     function PanelIcon() {
       return h("span", {
         style: { display: "inline-block", width: "14px", height: "14px", border: "1.5px solid currentColor", borderRadius: "3px" },
@@ -182,6 +219,9 @@ window.__ModuleLoader__.load({
         ctx.slots.register({ name: "sidebar.panellist", id: PANEL_ID, order: 5, label: () => "UAI 协作" }, PanelIcon));
       ctx.slots.inject("main", () =>
         ctx.slots.register({ name: "main", id: PANEL_ID }, Panel));
+      // 思考链里的自定义卡片：key 是 wire 工具名（必须与宿主注册的工具名一致）
+      ctx.slots.inject("tool.call.toolview", () =>
+        ctx.slots.register({ name: "tool.call.toolview", key: "uai_status" }, StatusCard));
     }
 
     return { apply, PANEL_ID, default: { apply } };

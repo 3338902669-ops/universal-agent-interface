@@ -84,17 +84,38 @@ def cmd_seats(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    hub = FileLock(paths.hub_lock(), namespace="uai-hub", ttl_s=args.ttl)
+    # 中枢锁路径同样可能被 seats.yml 的 hub 槽位覆盖（团队 base 的 data/hub.lock）；
+    # 只读 UAI_HOME 的默认路径会得到「未运行」，与实际不符。
+    hub_lock_path = paths.hub_lock()
+    for spec in (config.load(args.config).get("processes") or []):
+        if str(spec.get("lock") or "") == "hub" and spec.get("lock_path"):
+            hub_lock_path = Path(str(spec["lock_path"]))
+            break
+    hub = FileLock(hub_lock_path, namespace="uai-hub", ttl_s=args.ttl)
     hub_status = hub.status()
+    # 席位的真实来源是监督配置里的槽位（seats.yml 的 processes[] 中 lock: seat:<id>），
+    # 而不是 seats: []（那是 uai seats --from-detect 写的检测矩阵，默认是空的）。
+    # 以前这里只读后者，导致 status 永远报 0 席、面板是空的。
     seats = {}
-    for seat in (config.load(args.config).get("seats") or []):
-        sid = str(seat.get("id") or "")
-        if not sid:
+    cfg = config.load(args.config)
+    for spec in (cfg.get("processes") or []):
+        lock_spec = str(spec.get("lock") or "")
+        if not lock_spec.startswith("seat:"):
             continue
-        lock = FileLock(paths.seat_lock(sid), namespace="uai-seat:" + sid, ttl_s=args.ttl)
+        sid = lock_spec.split(":", 1)[1]
+        lock_path = spec.get("lock_path")
+        lock = FileLock(Path(lock_path) if lock_path else paths.seat_lock(sid),
+                        namespace="uai-seat:" + sid, ttl_s=args.ttl)
         st = lock.status()
         seats[sid] = {"held": st.get("held"), "pid": (st.get("holder") or {}).get("pid"),
                       "why": st.get("why")}
+    for seat in (cfg.get("seats") or []):
+        sid = str(seat.get("id") or "")
+        if sid and sid not in seats:
+            lock = FileLock(paths.seat_lock(sid), namespace="uai-seat:" + sid, ttl_s=args.ttl)
+            st = lock.status()
+            seats[sid] = {"held": st.get("held"), "pid": (st.get("holder") or {}).get("pid"),
+                          "why": st.get("why")}
     _print({
         "hub": hub_status,
         "seats": seats,
