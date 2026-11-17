@@ -564,7 +564,34 @@ class Hub:
     def schedule_dispatch(self) -> None:
         if not self.dispatch_scheduled:
             self.dispatch_scheduled = True
-            asyncio.create_task(self._dispatch_round())
+            # 关键：create_task 的异常默认没人收（只在 GC 时打一行 warn）。
+            # 一旦 _dispatch_round 抛异常或抛在 dispatch_lock 上，dispatch_scheduled
+            # 会永远停在 True → 之后**再也不会派发**，而进程/锁/心跳全都健康。
+            # 这就是 2026-11-18 实测到的「hub 假在线、任务永远 QUEUED」。
+            scheduled = asyncio.create_task(self._dispatch_round())
+            scheduled.add_done_callback(self._on_dispatch_done)
+
+    def _on_dispatch_done(self, finished: asyncio.Task[Any]) -> None:
+        # 无条件复位：这条标志位是派发循环的“心跳”，卡住就等于中枢瘫痪
+        self.dispatch_scheduled = False
+        if finished.cancelled():
+            return
+        error = finished.exception()
+        if error is None:
+            return
+        try:
+            self.record(
+                "DISPATCH_LOOP_ERROR",
+                error=repr(error)[:300],
+                note="派发循环异常，已复位并重排",
+            )
+        except Exception:
+            pass
+        # 自愈：下一个事件循环轮次重排一次（有 QUEUED 才会真干活）
+        try:
+            asyncio.get_running_loop().call_later(1.0, self.schedule_dispatch)
+        except RuntimeError:
+            pass
 
     async def _dispatch_round(self) -> None:
         async with self.dispatch_lock:
@@ -1584,6 +1611,22 @@ class Hub:
                         return
 
             heartbeat_task = asyncio.create_task(_singleton_beat())
+        async def _dispatch_watchdog() -> None:
+            """派发看护：有 QUEUED 却没在派发，就补一次 schedule_dispatch。
+
+            这是对 dispatch_scheduled 卡死的第二道保险：即便标志位被意外置 True，
+            看护也能发现「有活却没派」并把它救回来。"""
+            while True:
+                await asyncio.sleep(5.0)
+                try:
+                    pending = any(t.state == "QUEUED" for t in self.tasks.values())
+                    if pending and not self.dispatch_scheduled:
+                        self.schedule_dispatch()
+                except Exception:
+                    pass
+
+        dispatch_task = asyncio.create_task(_dispatch_watchdog())
+
         loop = asyncio.get_running_loop()
         for signal_name in (signal.SIGINT, signal.SIGTERM):
             with contextlib.suppress(NotImplementedError):
@@ -1603,6 +1646,7 @@ class Hub:
             flush=True,
         )
         await self.stop_event.wait()
+        dispatch_task.cancel()
         if heartbeat_task is not None:
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
