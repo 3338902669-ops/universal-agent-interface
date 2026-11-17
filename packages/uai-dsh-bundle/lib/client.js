@@ -207,6 +207,41 @@ window.__ModuleLoader__.load({
           : null);
     }
 
+
+    function DetectCard(props) {
+      const phase = props && props.phase;
+      const block = props && props.block;
+      const result = (block && block.result) || null;
+      const value = (result && result.value) || result || null;
+      const ok = value && value.ok === true;
+      const label = phase === "preparing" ? "检测中" : phase === "start" ? "检测中" : ok ? "完成" : "失败";
+      const color = ok ? T.green : phase === "preparing" || phase === "start" ? T.amber : T.red;
+      const readyIds = value && value.ready_ids ? String(value.ready_ids).split(",").filter(Boolean) : [];
+      return h("div", {
+        style: {
+          border: "1px solid " + T.line, background: T.bg1, color: T.fg1,
+          fontFamily: T.sans, fontSize: T.body, padding: "8px 12px",
+        },
+      },
+        h("div", { style: { display: "flex", alignItems: "center", gap: "8px" } },
+          h("i", { style: { width: "6px", height: "6px", borderRadius: "50%", background: color } }),
+          h("span", { style: { fontWeight: 600 } }, "AI Agent 能力检测"),
+          h("span", { style: { marginLeft: "auto", fontSize: T.micro, letterSpacing: ".1em", textTransform: "uppercase", color: color } }, label)),
+        value && value.summary
+          ? h("div", { style: { marginTop: "6px", fontSize: T.small, color: T.fg2 } }, String(value.summary))
+          : null,
+        readyIds.length
+          ? h("div", { style: { marginTop: "6px", display: "flex", gap: "6px", flexWrap: "wrap" } },
+              readyIds.map((id) => h("span", {
+                key: id,
+                style: {
+                  fontSize: T.micro, letterSpacing: ".08em", textTransform: "uppercase",
+                  border: "1px solid " + T.line, color: T.fg1, padding: "1px 6px",
+                },
+              }, id)))
+          : null);
+    }
+
     function PanelIcon() {
       return h("span", {
         style: { display: "inline-block", width: "14px", height: "14px", border: "1.5px solid currentColor", borderRadius: "3px" },
@@ -222,6 +257,8 @@ window.__ModuleLoader__.load({
       // 思考链里的自定义卡片：key 是 wire 工具名（必须与宿主注册的工具名一致）
       ctx.slots.inject("tool.call.toolview", () =>
         ctx.slots.register({ name: "tool.call.toolview", key: "uai_status" }, StatusCard));
+      ctx.slots.inject("tool.call.toolview", () =>
+        ctx.slots.register({ name: "tool.call.toolview", key: "uai_detect" }, DetectCard));
     }
 
     return { apply, PANEL_ID, default: { apply } };

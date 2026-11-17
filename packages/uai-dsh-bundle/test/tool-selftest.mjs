@@ -13,11 +13,12 @@ function check(name, cond, detail = "") {
   console.log((cond ? "PASS  " : "FAIL  ") + name + (detail ? "  " + detail : ""));
 }
 
-let registered = null;
-const ctx = { tools: { register: (t) => { registered = t; } }, logger: { info() {} } };
+const registeredTools = new Map();
+const ctx = { tools: { register: (tool) => { registeredTools.set(tool.name, tool); } }, logger: { info() {} } };
 const passthrough = (options) => options;
 
 const ok = await registerTool(ctx, passthrough);
+const registered = registeredTools.get("uai_status") || null;
 check("注入 defineTool 后注册成功", ok === true);
 check("工具名是 wire 名 uai_status", registered !== null && registered.name === "uai_status",
   registered ? registered.name : "none");
@@ -44,6 +45,22 @@ if (registered) {
       JSON.stringify({ hub_held: out.hub_held, seats: out.seats, seats_running: out.seats_running, supervisor: out.supervisor }));
     check("render() 能产出文本块", Array.isArray(registered.output.render({}, out)) &&
       registered.output.render({}, out)[0].type === "text");
+  }
+}
+
+// ---- 第二个工具：uai_detect ----
+const detect = registeredTools.get("uai_detect") || null;
+check("同时注册了 uai_detect", detect !== null, detect ? detect.name : "none");
+if (detect) {
+  const out = await detect.execute({});
+  check("uai_detect 返回 ok 与摘要",
+    typeof out.ok === "boolean" && typeof out.summary === "string" && out.summary.length > 0,
+    String(out.summary).slice(0, 90));
+  if (out.ok) {
+    check("uai_detect 摘要形如「就绪 N/M」", out.summary.indexOf("就绪") >= 0, String(out.summary).slice(0, 90));
+    check("uai_detect 字段齐全（ready/absent/ready_ids）",
+      typeof out.ready === "number" && typeof out.absent === "number" && typeof out.ready_ids === "string",
+      JSON.stringify({ ready: out.ready, absent: out.absent }));
   }
 }
 

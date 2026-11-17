@@ -10,11 +10,15 @@ DSH 里的 UAI 协作面板：左侧栏一个「UAI 协作」页，显示中枢/
 | lib/index.js | 宿主侧插件：在 127.0.0.1:47311 开只读 HTTP 桥，把 uai status/detect/seats 转成 JSON（含 CORS） |
 | lib/client.js | 客户端插件：注册 sidebar.panellist 入口 + main 面板内容（window.__ModuleLoader__ 格式，React 由宿主提供） |
 | test/host-selftest.mjs | 不装进 DSH 也能验：桥启动、CORS、status JSON、404 |
-| test/tool-selftest.mjs | 验 uai_status 工具：注册、参数表、输出 schema、execute 摘要与字段 |
+| test/tool-selftest.mjs | 验两个工具 uai_status / uai_detect：注册、参数表、输出 schema、execute 摘要与字段 |
+| test/client-selftest.mjs | 用 React 垫片 + loader mock 验客户端：注册 4 个 slot、面板与两张卡片都能渲染 |
+| scripts/install.ps1 | 一键安装（pnpm link + 写 bundles + 环境变量提示），幂等，改前备份 |
+| scripts/uninstall.ps1 | 一键卸载（移出 bundles + pnpm remove） |
+| scripts/patch-profile.mjs | 幂等维护 profile 的 dsh.profile.bundles（add/remove/check） |
 
-宿主还注册了一个工具 **uai_status**（wire 名 `uai_status`）：模型可以直接问常驻面状态，
+宿主注册两个工具：**uai_status**（常驻面：中枢/席位/监督）与 **uai_detect**（能力矩阵：就绪 N/M）。模型可以直接问，
 客户端为它注册 `tool.call.toolview` 卡片 —— 这样一次调用在思考链里是一张卡（中枢/席位/监督 + 状态色），
-而不是一行 JSON。
+而不是一行 JSON。卡片各一张：`uai_status` → 中枢/席位/监督三格；`uai_detect` → 摘要 + 就绪 agent 标签。
 
 端点：/uai/ping、/uai/status、/uai/detect、/uai/seats。
 
@@ -28,6 +32,10 @@ DSH 里的 UAI 协作面板：左侧栏一个「UAI 协作」页，显示中枢/
 ## 安装（改 profile，需要重启 DSH 才生效）
 
 ~~~powershell
+# 一键（幂等、改前自动备份 package.json）
+.\scripts\install.ps1 -CoreCmd "<python.exe> -m uai_core"
+
+# 等价的手工步骤：
 # 1) 装进当前 profile（link 方式：改代码后只需重启，不用重装）
 cd $env:USERPROFILE\.dsh\profiles\desktop
 pnpm add "link:<repo>\packages\uai-dsh-bundle"
@@ -52,15 +60,15 @@ $env:UAI_CMD="<python> -m uai_core"; $env:UAI_BASE="<数据面>"
 node test/host-selftest.mjs
 # 期望 RESULT: 5/5 passed，且 /uai/status ok=true
 node test/tool-selftest.mjs
-# 期望 RESULT: 10/10 passed，摘要形如「中枢 运行中 · 席位 4/4 · 监督 1」
+# 期望 RESULT: 14/14 passed，摘要形如「中枢 运行中 · 席位 4/4 · 监督 1」「就绪 5/12（dsh, codex, …）」
+node test/client-selftest.mjs
+# 期望 RESULT: 11/11 passed（不需要 React、不需要 DSH）
 ~~~
 
 ## 卸载
 
 ~~~powershell
-cd $env:USERPROFILE\.dsh\profiles\desktop
-pnpm remove @uai/dsh-bundle
-# 并从 package.json 的 dsh.profile.bundles 里删掉 @uai/dsh-bundle
+.\scripts\uninstall.ps1
 ~~~
 
 ## 已知边界（如实）

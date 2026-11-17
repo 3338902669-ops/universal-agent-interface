@@ -117,6 +117,46 @@ export async function registerTool(ctx, defineToolOverride) {
     },
   });
   ctx.tools.register(tool);
+
+  const detectTool = defineTool({
+    name: "uai_detect",
+    description: "Detect which AI agents are installed and ready on this machine (UAI capability matrix).",
+    parameters: {},
+    output: {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ok: { type: "boolean", required: true, description: "Whether detection ran" },
+          summary: { type: "string", required: true, description: "One-line human summary" },
+          ready: { type: "number", description: "Agents detected ready" },
+          absent: { type: "number", description: "Agents absent" },
+          ready_ids: { type: "string", description: "Comma-separated ready agent ids" },
+          error: { type: "string", description: "Error detail when ok=false" },
+        },
+      },
+      render: (_args, value) => [{ type: "text", text: value.summary }],
+    },
+    async execute() {
+      const res = await runUai(["detect", "--json"]);
+      if (!res.ok) {
+        return { ok: false, summary: "能力检测失败：" + res.error, error: res.error };
+      }
+      const d = res.data || {};
+      const counts = d.counts || {};
+      const readyIds = Array.isArray(d.ready) ? d.ready : [];
+      return {
+        ok: true,
+        summary: "就绪 " + (counts.ready || 0) + "/" +
+          ((counts.ready || 0) + (counts.absent || 0)) +
+          (readyIds.length ? "（" + readyIds.join(", ") + "）" : ""),
+        ready: counts.ready || 0,
+        absent: counts.absent || 0,
+        ready_ids: readyIds.join(","),
+      };
+    },
+  });
+  ctx.tools.register(detectTool);
   return true;
 }
 
