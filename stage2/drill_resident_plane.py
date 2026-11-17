@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -96,7 +97,7 @@ def kill(pids):
         UPROC.kill(int(pid), timeout=8.0)
 
 
-def fire_autostart():
+def fire_autostart() -> tuple[bool, str]:
     """触发**真正的登录入口**：uai install-service 写入启动文件夹的那个 vbs。
 
     旧的 start-uai-hub.vbs（PowerShell 监督）在 2026-11-17 已被 uai serve 取代，
@@ -106,17 +107,26 @@ def fire_autostart():
     startup = Path(_os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
     candidates = [startup / "uai-core.vbs",
                   Path.home() / "Library" / "LaunchAgents" / "com.uai.core.plist"]
+    errors = []
     for cand in candidates:
         if not cand.exists():
+            errors.append("%s: missing" % cand)
             continue
         try:
             if cand.suffix == ".vbs":
-                subprocess.run(["wscript.exe", str(cand)], timeout=60)
+                res = subprocess.run(["wscript.exe", str(cand)], timeout=60,
+                                     capture_output=True, text=True)
             else:
-                subprocess.run(["launchctl", "load", str(cand)], timeout=60)
-            return
-        except Exception:
-            continue
+                res = subprocess.run(["launchctl", "load", str(cand)], timeout=60,
+                                     capture_output=True, text=True)
+            if res.returncode == 0:
+                return True, str(cand)
+            errors.append("%s: rc=%s %s" % (cand.name, res.returncode,
+                                            (res.stderr or "").strip()[:120]))
+        except Exception as exc:
+            errors.append("%s: %s" % (cand.name, str(exc)[:120]))
+    print("    autostart FAILED: " + " | ".join(errors))
+    return False, "; ".join(errors)
 
 def fire_autostart():
     subprocess.run(["wscript.exe", VBS], timeout=60)
@@ -165,19 +175,28 @@ def drill_seat_restart(base: Path) -> None:
     check("新席位重新持有席位锁", lp == newpid, "lock_holder=%s" % lp)
 
 
+def identity(base: Path) -> dict:
+    """「谁在跑」的语义身份 = 各槽位单例锁的持有者。
+
+    为什么不比进程 pid 列表：监督器会短暂拉起一个子进程去探锁（子进程发现锁被占就
+    exit 3），那一两秒里进程表上确实多一个 pid —— 拿它做幂等判据会误报。
+    锁持有者不会因为"探测"而变化，这才是真正的身份。
+    """
+    out = {"hub": lock_pid(base, "hub.lock", "uai-hub")}
+    for sid in ("dsh", "tianshu", "codex", "xiaoyu"):
+        out[sid] = lock_pid(base, "seat-%s.lock" % sid, "uai-seat:%s" % sid)
+    return out
+
+
 def drill_idempotent_autostart(base: Path) -> None:
-    hb = sorted(p["ProcessId"] for p in procs("hub"))
-    sb = sorted(p["ProcessId"] for p in procs("seat"))
+    ib = identity(base)
     supb = sorted(p["ProcessId"] for p in procs("supervisor"))
     fire_autostart()
     time.sleep(10)
-    ha = sorted(p["ProcessId"] for p in procs("hub"))
-    sa = sorted(p["ProcessId"] for p in procs("seat"))
+    ia = identity(base)
     supa = sorted(p["ProcessId"] for p in procs("supervisor"))
-    check("运行中再点自启：中枢 pid 不变（幂等，不重建）", hb == ha,
-          "before=%s after=%s" % (hb, ha))
-    check("运行中再点自启：席位 pid 不变", sb == sa,
-          "before=%s after=%s" % (sb, sa))
+    check("运行中再点自启：各槽位锁持有者不变（真幂等）", ib == ia,
+          "before=%s after=%s" % (json.dumps(ib), json.dumps(ia)))
     check("运行中再点自启：监督仍只有一个", len(supa) == 1 and supb == supa,
           "before=%s after=%s" % (supb, supa))
 
@@ -192,7 +211,8 @@ def drill_total_recovery(base: Path) -> None:
           "failed=%s" % ",".join(down["failed"][:4]))
 
     print("    点自启入口，等整套起来...")
-    fire_autostart()
+    fired, detail = fire_autostart()
+    check("自启入口真的被触发（不再静默吞错）", fired, detail[:90])
     up = wait_for(lambda: (lambda r: r if r["ok"] else None)(RH.collect()), 90, 5)
     check("自启入口能把一整套拉回来且健康检查全绿", bool(up),
           "failed=%s" % (up["failed"] if up else RH.collect()["failed"]))

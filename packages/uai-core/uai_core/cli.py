@@ -119,6 +119,40 @@ def _spawn(cmd: list[str], log_path: Path) -> subprocess.Popen:
                             cwd=str(paths.uai_home()), env=env)
 
 
+
+
+def _slot_owner(spec: dict) -> int | None:
+    """该槽位的单例锁被哪个活进程持着？返回 pid 或 None。
+
+    为什么要在 spawn 之前查：不查的话，监督器会先把子进程拉起来，子进程发现锁被占、
+    立刻 exit 3，监督器再记一笔 slot_already_owned —— 进程表上就出现一两秒的幽灵进程，
+    演练/巡检会把它们当成「pid 变了」。先查锁就没有这个抖动。
+    """
+    from .oslayer.lock import FileLock
+
+    lock_path = spec.get("lock_path")
+    ns = "default"
+    if not lock_path:
+        kind = str(spec.get("lock") or "")
+        if kind == "hub":
+            lock_path = str(paths.hub_lock())
+            ns = "uai-hub"
+        elif kind.startswith("seat:"):
+            sid = kind.split(":", 1)[1]
+            lock_path = str(paths.seat_lock(sid))
+            ns = "uai-seat:" + sid
+        else:
+            return None
+    try:
+        st = FileLock(lock_path, namespace=ns, ttl_s=600).status()
+    except Exception:
+        return None
+    pid = (st.get("holder") or {}).get("pid")
+    if st.get("held") and pid and proc.alive(int(pid)):
+        return int(pid)
+    return None
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """监督循环：一次只有一个（supervisor 锁），子进程退出按退避重启。"""
     cfg = config.load(args.config)
@@ -161,6 +195,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             pass
 
     _print({"ok": True, "event": "supervisor_started", "pid": os.getpid(),
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "processes": [p.get("name") for p in procs]})
     try:
         while not stopping["flag"]:
@@ -179,7 +214,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                         if name not in _external_logged:
                             _external_logged.add(name)
                             _print({"event": "slot_already_owned", "name": name,
-                                    "exit_code": rc})
+                            "exit_code": rc, "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
                         continue
                     # 每个槽位独立退避：一次成功启动不能让别的槽位继续等
                     slot_backoff[name] = min(max_backoff, slot_backoff.get(name, base_backoff) * 2)
@@ -188,6 +223,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     continue
                 cmd = [str(c) for c in spec.get("command") or []]
                 if not cmd:
+                    continue
+                owner = _slot_owner(spec)
+                if owner is not None:
+                    if name not in _external_logged:
+                        _external_logged.add(name)
+                        _print({"event": "slot_adopted", "name": name, "holder_pid": owner,
+                                "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
                     continue
                 port = spec.get("port")
                 if port and proc.tcp_listening(int(port)):
