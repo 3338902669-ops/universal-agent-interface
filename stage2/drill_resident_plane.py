@@ -46,12 +46,13 @@ def _pids(kind: str) -> list[int]:
         pids = []
         for tokens in forms:
             pids.extend(r["pid"] for r in UPROC.find(contains=tokens,
+                                                    name_prefix=("python",),
                                                     exclude_pids=(os.getpid(),)))
         return sorted(set(pids))
     if kind == "hub":
-        return [r["pid"] for r in UPROC.find(contains=("hub.py",),
+        return [r["pid"] for r in UPROC.find(contains=("hub.py",), name_prefix=("python",),
                                              exclude_pids=(os.getpid(),))]
-    return [r["pid"] for r in UPROC.find(contains=("interface.py",),
+    return [r["pid"] for r in UPROC.find(contains=("interface.py",), name_prefix=("python",),
                                          exclude_pids=(os.getpid(),))]
 
 
@@ -66,7 +67,8 @@ def UPROC_WITH_SEAT() -> list[dict]:
     from uai_core.oslayer import proc as UPROC
 
     out = []
-    for row in UPROC.find(contains=("interface.py",), exclude_pids=(os.getpid(),)):
+    for row in UPROC.find(contains=("interface.py",), name_prefix=("python",),
+                          exclude_pids=(os.getpid(),)):
         seat = None
         parts = row["cmdline"]
         for i, token in enumerate(parts):
@@ -95,12 +97,26 @@ def kill(pids):
 
 
 def fire_autostart():
-    """旧部署用 vbs；新部署用 uai install-service + uai serve。两者都试。"""
-    vbs = r"C:\Users\33389\.shared\uai-hub\start-uai-hub.vbs"
-    try:
-        subprocess.run(["wscript.exe", vbs], timeout=60)
-    except Exception:
-        pass
+    """触发**真正的登录入口**：uai install-service 写入启动文件夹的那个 vbs。
+
+    旧的 start-uai-hub.vbs（PowerShell 监督）在 2026-11-17 已被 uai serve 取代，
+    这里不再回退到它——否则演练会拉起的是一套已经退役的监督器。
+    """
+    import os as _os
+    startup = Path(_os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    candidates = [startup / "uai-core.vbs",
+                  Path.home() / "Library" / "LaunchAgents" / "com.uai.core.plist"]
+    for cand in candidates:
+        if not cand.exists():
+            continue
+        try:
+            if cand.suffix == ".vbs":
+                subprocess.run(["wscript.exe", str(cand)], timeout=60)
+            else:
+                subprocess.run(["launchctl", "load", str(cand)], timeout=60)
+            return
+        except Exception:
+            continue
 
 def fire_autostart():
     subprocess.run(["wscript.exe", VBS], timeout=60)

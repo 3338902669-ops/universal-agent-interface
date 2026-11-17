@@ -181,7 +181,10 @@ def check_supervisor() -> dict:
     forms = (("uai_core", "serve"), ("run-uai-hub.ps1", "-File"))
     found = []
     for tokens in forms:
+        # name_prefix 很关键：宿主应用（如 DSH）自身的命令行里可能带着我们正在搜的
+        # 字样（"-m uai_core serve" 曾出现在它的 -Command 串里），只按子串匹配会误数。
         found.extend(r["pid"] for r in UPROC.find(contains=tokens,
+                                                 name_prefix=("python",),
                                                  exclude_pids=(os.getpid(),)))
     pids = sorted(set(found))
     return check("supervisor_present", len(pids) == 1,

@@ -214,3 +214,33 @@ grep 实测（不含文档）的 Windows 强耦合点：
 NATS 4223 不监听、账本与心跳停在 12:55。健康检查如实报红（正是它该做的事）。
 手动执行自启入口后恢复，14 项全绿。
 **结论**：自启只在登录时跑一次，监督进程被杀后没有任何东西会把它拉回来——这正是 `uai serve` + `install-service` 要补的位，也说明 F-06 的冷启动验证依然必要。
+
+## 17 P0.5 接管：PowerShell 监督 → `uai serve`（2026-11-17 22:0x）
+
+| 项 | 之前 | 现在 |
+|---|---|---|
+| 监督循环 | `run-uai-hub.ps1`（PowerShell + wscript） | `pythonw -m uai_core serve`（Python，跨平台） |
+| 配置 | 脚本里写死 | `$UAI_HOME/seats.yml`（命令数组 + 端口 + 槽位锁） |
+| 自启 | `start-uai-hub.vbs` | `uai install-service` → 启动文件夹 `uai-core.vbs`（同一套代码在 Linux/macOS 上换成 systemd/launchd） |
+| 退避 | 固定 30s 轮询 | 每槽位独立退避 5s→60s，成功启动即复位 |
+| 重复启动 | 靠清场脚本 | 监督锁（拿不到 exit 3）+ **槽位已被持有则记一次并放弃**（不死循环） |
+| NATS | 由旧监督顺带拉起 | 作为 `port: 4223` 的槽位；端口已被外部实例占用时自动「外部托管」，不起第二份 |
+
+实测：
+- 旧监督 + 5 个子进程干净停止（`kill tree`），4223 释放；
+- 新监督启动 6 个槽位（nats/hub/4 座席），健康检查 **14 项全绿 exit 0**，`supervisor_present count=1`；
+- **硬杀 hub → 3.1s 拉起新 hub**（pid 3792 → 50856），健康检查随即全绿；
+- 再起第二个 `uai serve` → 监督锁拒绝（`held_by_other`，持有者 47524）；
+- 先杀监督、留子进程再重启 → 每个槽位报 `slot_already_owned (exit 3)` 后放弃，不刷日志、不叠实例。
+
+### 17.1 过程中修掉的两个自己的坑
+
+1. **监督器误数自己**：健康检查用「命令行含 `uai_core`+`serve`」找监督，结果把宿主应用（DSH）也算进去了，
+   因为它的 `-Command` 串里带着同样的字样。修法：`proc.find(name_prefix=('python',))`——先按进程名收敛，再按子串匹配。
+2. **全局退避把无关槽位一起拖慢**：原来是单个 `backoff` 变量每次 spawn 都翻倍，导致 hub 被杀后要等 60s 才重试。
+   修法：每槽位独立退避 + 成功即复位 → 实测 3.1s。
+
+### 17.2 仍未闭环
+
+- **监督者自己的看守**：`uai serve` 被杀后没有任何东西把它拉回来（本次事故就是这样全灭的）。需要二级看护：
+  计划任务/launchd KeepAlive 已由 `install-service` 声明，但**Windows 上不重启就验证不了**，属 F-06 冷启动项。

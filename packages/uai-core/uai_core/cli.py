@@ -143,10 +143,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return EXIT_ALREADY_RUNNING
 
     paths.ensure_home()
-    backoff = float(cfg.get("supervisor", {}).get("restart_backoff_s", 5.0))
+    base_backoff = float(cfg.get("supervisor", {}).get("restart_backoff_s", 5.0))
     max_backoff = float(cfg.get("supervisor", {}).get("max_backoff_s", 60.0))
+    slot_backoff: dict[str, float] = {}
     children: dict[str, subprocess.Popen] = {}
     waits: dict[str, float] = {}
+    _external_logged: set[str] = set()
     stopping = {"flag": False}
 
     def _stop(signum, frame):
@@ -169,12 +171,31 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 if child is not None and child.poll() is None:
                     continue
                 if child is not None and child.poll() is not None:
-                    waits[name] = now + backoff
+                    rc = child.returncode
                     children.pop(name, None)
+                    if rc == EXIT_ALREADY_RUNNING:
+                        # 该槽位已有别的实例在跑（单例锁拒绝）：接管不了就别反复重试，
+                        # 否则会每 5s 起一个立刻退出的进程，把日志刷满。
+                        if name not in _external_logged:
+                            _external_logged.add(name)
+                            _print({"event": "slot_already_owned", "name": name,
+                                    "exit_code": rc})
+                        continue
+                    # 每个槽位独立退避：一次成功启动不能让别的槽位继续等
+                    slot_backoff[name] = min(max_backoff, slot_backoff.get(name, base_backoff) * 2)
+                    waits[name] = now + slot_backoff.get(name, base_backoff)
                 if now < waits.get(name, 0):
                     continue
                 cmd = [str(c) for c in spec.get("command") or []]
                 if not cmd:
+                    continue
+                port = spec.get("port")
+                if port and proc.tcp_listening(int(port)):
+                    # 端口已被外部实例占用：不起第二份（否则会绑定失败、无限重启）
+                    if name not in _external_logged:
+                        _external_logged.add(name)
+                        _print({"event": "external_service_detected", "name": name,
+                                "port": int(port)})
                     continue
                 log = paths.logs_dir() / (name + ".log")
                 try:
@@ -182,7 +203,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 except Exception as exc:
                     _print({"event": "spawn_failed", "name": name, "error": str(exc)[:200]})
                     waits[name] = now + max_backoff
-                backoff = min(max_backoff, backoff * 2)
+                else:
+                    # 启动成功 → 该槽位的退避复位（下一次异常从 base 重新开始）
+                    slot_backoff[name] = base_backoff
             try:
                 guard.heartbeat()
             except SingletonError:
@@ -243,7 +266,23 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _ensure_streams() -> None:
+    """pythonw / 服务方式启动时 stdout 是 None，print 会直接炸。这里兜到日志文件。"""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        paths.ensure_home()
+        log_dir = paths.logs_dir()
+        if sys.stdout is None:
+            sys.stdout = open(log_dir / "supervisor.out.log", "a", encoding="utf-8", buffering=1)
+        if sys.stderr is None:
+            sys.stderr = open(log_dir / "supervisor.err.log", "a", encoding="utf-8", buffering=1)
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _ensure_streams()
     args = build_parser().parse_args(argv)
     table = {
         "doctor": cmd_doctor,

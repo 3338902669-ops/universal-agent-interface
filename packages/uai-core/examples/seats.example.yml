@@ -1,0 +1,31 @@
+# UAI 席位与监督配置（示例）
+# 复制到 $UAI_HOME/seats.yml 后按本机路径改。所有路径建议用正斜杠，Windows 也认。
+schema: uai.seats/v1
+hub:
+  nats_url: nats://127.0.0.1:4223
+supervisor:
+  restart_backoff_s: 5.0      # 单槽位首次重试间隔
+  max_backoff_s: 60.0         # 退避上限（每个槽位独立退避）
+
+# processes 是监督循环真正拉起的命令；每条都很朴素：命令数组 + 工作目录 + 可选端口/锁。
+# port: 该端口已被外部实例占用时不再起第二份（外部托管）。
+# 子进程以退出码 3 退出表示「该槽位已被别的实例持有」，监督器记一次 slot_already_owned 后不再重试。
+processes:
+  - name: nats
+    command: [nats-server, -c, ./nats-hub.conf]
+    cwd: ${REPO}/prototype
+    port: 4223
+    critical: true
+  - name: hub
+    command: [python, ${REPO}/prototype/hub.py, --base, ${UAI_BASE}, --nats-url, nats://127.0.0.1:4223]
+    lock: hub
+    critical: true
+  - name: seat-dsh
+    command: [python, ${REPO}/prototype/interface.py, --base, ${UAI_BASE},
+              --interface-id, dsh, --token-file, ${UAI_BASE}/.lab-tokens/dsh.token,
+              --nats-url, nats://127.0.0.1:4223, --executor, runtime,
+              --runtime-executable, ${REPO}/stage2/runtime_adapters/dsh_adapter.py]
+    lock: seat:dsh
+
+# seats: 由 `uai seats --from-detect` 生成（10+ 厂商的能力矩阵与启用状态）
+seats: []

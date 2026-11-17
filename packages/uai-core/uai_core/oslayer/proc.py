@@ -30,6 +30,7 @@ def iter_processes() -> Iterator[dict]:
 
 
 def find(*, contains: Iterable[str] = (), name: Iterable[str] = (),
+         name_prefix: Iterable[str] = (),
          exclude_contains: Iterable[str] = (),
          exclude_pids: Iterable[int] = ()) -> list[dict]:
     """按命令行子串 / 进程名匹配。全部条件满足才算命中。
@@ -38,13 +39,17 @@ def find(*, contains: Iterable[str] = (), name: Iterable[str] = (),
     """
     contains = tuple(contains)
     names = tuple(n.lower() for n in name)
+    prefixes = tuple(n.lower() for n in name_prefix)
     excludes = tuple(exclude_contains)
     skip = {int(x) for x in exclude_pids}
     out = []
     for row in iter_processes():
         if row["pid"] in skip:
             continue
-        if names and row["name"].lower() not in names:
+        proc_name = row["name"].lower()
+        if names and proc_name not in names:
+            continue
+        if prefixes and not any(proc_name.startswith(x) for x in prefixes):
             continue
         cmd = row["cmd"]
         if contains and not all(token in cmd for token in contains):
@@ -71,8 +76,8 @@ def alive(pid: int) -> bool:
         return False
 
 
-def kill(pid: int, *, timeout: float = 8.0) -> bool:
-    """终止进程（含子进程）。返回是否已不在。"""
+def kill(pid: int, *, timeout: float = 8.0, tree: bool = True) -> bool:
+    """终止进程。tree=True 连子进程一起（监督进程/席位默认），False 只杀自己。"""
     try:
         parent = psutil.Process(int(pid))
     except (psutil.NoSuchProcess, ValueError, TypeError):
@@ -80,10 +85,11 @@ def kill(pid: int, *, timeout: float = 8.0) -> bool:
     except psutil.AccessDenied:
         return False
     victims = []
-    try:
-        victims = parent.children(recursive=True)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        pass
+    if tree:
+        try:
+            victims = parent.children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
     for victim in victims + [parent]:
         try:
             victim.terminate()
@@ -97,3 +103,14 @@ def kill(pid: int, *, timeout: float = 8.0) -> bool:
             pass
     gone2, still2 = psutil.wait_procs(still, timeout=3.0)
     return not still2
+
+
+def tcp_listening(port: int, host: str = "127.0.0.1", timeout: float = 1.0) -> bool:
+    """端口有没有人在听（用来判定「外部已提供」，避免起一份绑不上的重复服务）。"""
+    import socket
+
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
