@@ -38,6 +38,14 @@ const reactShim = {
   useRef: (initial) => ({ current: initial }),
 };
 
+// ---- document mock（验 apply 里的样式注入） ----
+const styles = [];
+globalThis.document = {
+  head: { appendChild: (el) => styles.push(el) },
+  getElementById: (id) => styles.find((el) => el.id === id) || null,
+  createElement: (tag) => ({ tag, id: "", textContent: "" }),
+};
+
 // ---- loader mock ----
 let loaded = null;
 globalThis.window = {
@@ -79,6 +87,17 @@ check("main 面板存在", names.indexOf("main") >= 0);
 const viewKeys = registrations.filter((r) => r.options.name === "tool.call.toolview").map((r) => r.options.key);
 check("tool.call.toolview 覆盖 uai_status 与 uai_detect",
   viewKeys.indexOf("uai_status") >= 0 && viewKeys.indexOf("uai_detect") >= 0, viewKeys.join(","));
+
+check("apply 注入了面板样式（<style id=uai-panel-style>）",
+  styles.length === 1 && styles[0].id === "uai-panel-style", "styles=" + styles.length);
+check("注入的 CSS 含设计令牌（--uai-bg2 / --uai-dur）",
+  styles.length === 1 && styles[0].textContent.includes("--uai-bg2") &&
+  styles[0].textContent.includes("--uai-dur"),
+  styles.length ? String(styles[0].textContent.length) + " chars" : "none");
+check("注入的 CSS 含 reduce 降级与 390 断点",
+  styles.length === 1 && styles[0].textContent.includes("prefers-reduced-motion") &&
+  styles[0].textContent.includes("max-width: 560px"));
+check("再次 apply 不重复注入（幂等）", (() => { loaded.exports.apply(ctx); return styles.length === 1; })());
 
 // ---- 渲染（收集文本） ----
 function textOf(node, out = []) {

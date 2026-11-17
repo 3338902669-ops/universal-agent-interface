@@ -1,11 +1,12 @@
 /**
- * UAI × DSH 客户端插件：侧栏「UAI 协作」页。
+ * UAI × DSH 客户端插件：侧栏「UAI 协作」看板。
  *
- * 文件格式与 DSH 自带客户端插件一致：注册进 window.__ModuleLoader__，
- * 依赖（react）由宿主提供（require），不打包 React。
+ * 设计契约见 docs/design/ui-20261118-panel/DESIGN.md（按《网页制作流程 v1》十阶段产出）：
+ *   概念 = 控制室仪表排（先看数，再看灯，最后才看字）；运动预算 = 低档。
+ *   颜色/间距/字阶一律来自 panel.css —— 本文件不写任何色值，
+ *   面板 CSS 由 scripts/build-css.mjs 从 panel.css 编译成 panel-css.js 后注入。
  *
- * 视觉令牌来自 docs/design/ui-20261117/TOKENS.md（RPA/Automation Dashboard 配方）：
- * #020617 / #0E1223 / #1A1E2F + 状态色 #22C55E / #F59E0B / #DC2626，radius 0，36px 行高。
+ * 文件格式与 DSH 自带客户端插件一致：注册进 window.__ModuleLoader__，React 由宿主提供。
  */
 window.__ModuleLoader__.load({
   id: "@uai/dsh-bundle",
@@ -13,48 +14,38 @@ window.__ModuleLoader__.load({
     const React = require("react");
     const h = React.createElement;
 
+    /* @uai-css:start —— 由 scripts/build-css.mjs 从 docs/design/ui-20261118-panel/panel.css 注入，勿手改 */
+const PANEL_CSS = "/* UAI 看板 · 设计令牌与样式（唯一源）\n * 生成物：packages/uai-dsh-bundle/lib/panel-css.js（scripts/build-css.mjs 生成，勿手改生成物）\n * 令牌依据：docs/design/ui-20261118-panel/verify/contrast.mjs 的实测比值（12/12 达标）\n * 概念：控制室仪表排 —— 先看数，再看灯，最后才看字。无卡片墙、无圆角、无发光边框。\n */\n\n:root,\n.uai-panel {\n  /* 表面（三级：页 / 面板 / 抬升） */\n  --uai-bg1: #020617;\n  --uai-bg2: #0E1223;\n  --uai-bg3: #1A1E2F;\n\n  /* 文字（fg3 已由 #5C6B85 提到 #7C8AA6：原值只有 3.6:1，不够 AA） */\n  --uai-fg1: #F8FAFC;   /* 17.77:1 on bg2 */\n  --uai-fg2: #94A3B8;   /* 7.25:1  on bg2 */\n  --uai-fg3: #7C8AA6;   /* 5.35:1  on bg2 */\n\n  /* 线：装饰线只做分隔（1.80:1），控件边框必须过 3:1 */\n  --uai-line: #334155;    /* 1.80:1 装饰 */\n  --uai-line-2: #556784;  /* 3.24:1 控件边框 */\n\n  /* 状态（都由实测修正过：#DC2626→#F04438、#F59E0B→#F5A524、#22C55E→#3DDC84） */\n  --uai-green: #3DDC84;   /* 10.42:1 */\n  --uai-amber: #F5A524;   /* 9.11:1  */\n  --uai-red: #F04438;     /* 4.95:1  */\n  --uai-accent: #16A34A;\n  --uai-accent-ink: #04140A;\n\n  /* 排版：UI 密排 1.45，数字一律等宽 + tabular */\n  --uai-font: system-ui, -apple-system, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif;\n  --uai-mono: ui-monospace, SFMono-Regular, \"JetBrains Mono\", Consolas, monospace;\n  --uai-fs-micro: 11px;\n  --uai-fs-sm: 12px;\n  --uai-fs-base: 13px;\n  --uai-fs-lead: 16px;\n  --uai-fs-title: 19px;\n\n  /* 间距 8pt 网格 */\n  --uai-s1: 4px;\n  --uai-s2: 8px;\n  --uai-s3: 12px;\n  --uai-s4: 16px;\n  --uai-s5: 24px;\n  --uai-row: 36px;\n\n  /* 运动：低预算档 —— 只有状态切换与焦点反馈，无入场、无视差 */\n  --uai-dur: 160ms;\n  --uai-ease: cubic-bezier(0.22, 0.61, 0.36, 1);\n}\n\n.uai-panel,\n.uai-panel * { box-sizing: border-box; }\n\n.uai-panel {\n  background: var(--uai-bg1);\n  color: var(--uai-fg1);\n  font-family: var(--uai-font);\n  font-size: var(--uai-fs-base);\n  line-height: 1.45;\n  min-height: 100%;\n  font-variant-numeric: tabular-nums;\n}\n\n/* ── 顶栏：标题 + 计数徽标 + 两个动作 ───────────────────────────── */\n.uai-head {\n  display: flex; align-items: center; gap: var(--uai-s2);\n  height: 52px; padding: 0 var(--uai-s3);\n  background: var(--uai-bg2);\n  border-bottom: 1px solid var(--uai-line);\n}\n.uai-title { font-size: var(--uai-fs-title); font-weight: 600; letter-spacing: -0.01em; }\n.uai-badge {\n  font-family: var(--uai-mono); font-size: var(--uai-fs-micro);\n  letter-spacing: 0.08em; color: var(--uai-fg2);\n  border: 1px solid var(--uai-line); padding: 2px 6px;\n}\n.uai-actions { margin-left: auto; display: flex; gap: var(--uai-s2); }\n\n.uai-btn {\n  height: 30px; padding: 0 var(--uai-s3);\n  border: 1px solid var(--uai-line-2); background: transparent; color: var(--uai-fg1);\n  font: inherit; font-size: var(--uai-fs-base); cursor: pointer;\n  transition: background var(--uai-dur) var(--uai-ease),\n              border-color var(--uai-dur) var(--uai-ease),\n              transform var(--uai-dur) var(--uai-ease);\n}\n.uai-btn:hover:not(:disabled) { background: var(--uai-bg3); border-color: var(--uai-fg3); }\n.uai-btn:active:not(:disabled) { transform: translateY(1px); }\n.uai-btn:disabled { opacity: 0.55; cursor: default; }\n.uai-btn--primary { background: var(--uai-accent); border-color: var(--uai-accent); color: var(--uai-accent-ink); font-weight: 600; }\n.uai-btn--primary:hover:not(:disabled) { background: #1FBF57; border-color: #1FBF57; }\n\n/* 焦点：键盘可见，不靠颜色单独传达 */\n.uai-panel :focus-visible {\n  outline: 2px solid var(--uai-green);\n  outline-offset: 2px;\n}\n\n/* ── Bento 仪表块 ────────────────────────────────────────────── */\n.uai-grid {\n  display: grid;\n  grid-template-columns: repeat(3, minmax(0, 1fr));\n  gap: 1px;                     /* 用 1px gap + 底色造分隔线，避免额外边框 */\n  background: var(--uai-line);\n  border-bottom: 1px solid var(--uai-line);\n}\n.uai-cell {\n  background: var(--uai-bg2);\n  padding: var(--uai-s3);\n  display: flex; flex-direction: column; gap: var(--uai-s1);\n  min-width: 0;\n}\n.uai-cell__k {\n  font-size: var(--uai-fs-micro); letter-spacing: 0.14em; text-transform: uppercase;\n  color: var(--uai-fg2);\n}\n.uai-cell__v {\n  font-family: var(--uai-mono); font-size: 22px; line-height: 1.1;\n  display: flex; align-items: baseline; gap: var(--uai-s2);\n}\n.uai-cell__u { font-size: var(--uai-fs-sm); color: var(--uai-fg3); font-family: var(--uai-font); }\n.uai-cell__note { font-size: var(--uai-fs-sm); color: var(--uai-fg3); }\n\n/* ── 表：席位一行为一席，36px 密排 ──────────────────────────── */\n.uai-section { border-bottom: 1px solid var(--uai-line); }\n.uai-section__h {\n  display: flex; align-items: center; justify-content: space-between;\n  height: 30px; padding: 0 var(--uai-s3);\n  background: var(--uai-bg2);\n  font-size: var(--uai-fs-micro); letter-spacing: 0.14em; text-transform: uppercase;\n  color: var(--uai-fg2);\n}\n.uai-section__h span:last-child { font-family: var(--uai-mono); letter-spacing: 0; }\n\n.uai-row {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr) 96px minmax(0, 132px);\n  align-items: center; gap: var(--uai-s3);\n  height: var(--uai-row); padding: 0 var(--uai-s3);\n  border-top: 1px solid var(--uai-line);\n  transition: background var(--uai-dur) var(--uai-ease);\n}\n.uai-row:hover { background: var(--uai-bg3); }\n.uai-row__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.uai-row__state { display: inline-flex; align-items: center; gap: 6px; font-size: var(--uai-fs-sm); color: var(--uai-fg2); }\n.uai-row__meta { font-family: var(--uai-mono); font-size: var(--uai-fs-sm); color: var(--uai-fg3); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n\n/* 状态灯：形状 + 颜色双编码（不只靠颜色） */\n.uai-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; background: var(--uai-fg3); }\n.uai-dot--on { background: var(--uai-green); }\n.uai-dot--warn { background: var(--uai-amber); }\n.uai-dot--off { background: var(--uai-red); }\n\n/* ── 检测结果：标签 + 状态 + 路径 ───────────────────────────── */\n.uai-cap { display: flex; flex-wrap: wrap; gap: var(--uai-s1); padding: var(--uai-s2) var(--uai-s3); }\n.uai-tag {\n  font-family: var(--uai-mono); font-size: var(--uai-fs-micro); letter-spacing: 0.06em;\n  border: 1px solid var(--uai-line); color: var(--uai-fg2);\n  padding: 2px 6px; text-transform: uppercase;\n}\n.uai-tag--ready { border-color: rgba(61, 220, 132, 0.45); color: var(--uai-green); }\n\n.uai-empty { padding: var(--uai-s3); color: var(--uai-fg2); font-size: var(--uai-fs-sm); }\n.uai-error {\n  margin: var(--uai-s3); padding: var(--uai-s3);\n  border: 1px solid var(--uai-red); color: var(--uai-red); font-size: var(--uai-fs-sm);\n}\n\n/* ── 390px：单列，行内改成两行 ──────────────────────────────── */\n@media (max-width: 560px) {\n  .uai-grid { grid-template-columns: minmax(0, 1fr); }\n  .uai-row { grid-template-columns: minmax(0, 1fr) auto; height: auto; padding: 8px var(--uai-s3); row-gap: 2px; }\n  .uai-row__meta { grid-column: 1 / -1; text-align: left; }\n  .uai-head { height: auto; padding: 8px var(--uai-s3); flex-wrap: wrap; }\n  .uai-actions { margin-left: 0; width: 100%; }\n  .uai-btn { flex: 1 1 auto; }\n}\n\n/* ── 低运动预算的降级：用户要求减少动效时全部瞬切 ───────────── */\n@media (prefers-reduced-motion: reduce) {\n  .uai-panel, .uai-panel * {\n    transition-duration: 0ms !important;\n    animation-duration: 0ms !important;\n  }\n}\n";
+/* @uai-css:end */
+
     const PANEL_ID = "uai-collab";
     const BRIDGE = "http://127.0.0.1:47311";
-
-    const T = {
-      bg1: "#020617", bg2: "#0E1223", bg3: "#1A1E2F",
-      fg1: "#F8FAFC", fg2: "#94A3B8", fg3: "#5C6B85",
-      line: "#334155", accent: "#16A34A",
-      green: "#22C55E", amber: "#F59E0B", red: "#DC2626",
-      micro: "11px", small: "12px", body: "14px", lead: "16px", title: "20px",
-      row: "36px", pad: "12px", gap: "8px",
-      mono: "ui-monospace, SFMono-Regular, Consolas, monospace",
-      sans: "system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif",
-    };
+    const STYLE_ID = "uai-panel-style";
 
     async function getJson(path) {
       const res = await fetch(BRIDGE + path, { cache: "no-store" });
       return res.json();
     }
 
-    function StatCell(label, value, color) {
-      return h("div", { style: { padding: "8px 12px", borderRight: "1px solid " + T.line } },
-        h("div", { style: { fontSize: T.micro, letterSpacing: ".14em", textTransform: "uppercase", color: T.fg2 } }, label),
-        h("div", { style: { fontSize: T.lead, color: color || T.fg1, fontVariantNumeric: "tabular-nums" } }, String(value)));
+    function cell(k, v, unit, note, dotClass) {
+      return h("div", { className: "uai-cell", key: k },
+        h("span", { className: "uai-cell__k" }, k),
+        h("span", { className: "uai-cell__v" },
+          dotClass ? h("i", { className: "uai-dot " + dotClass }) : null,
+          String(v),
+          unit ? h("span", { className: "uai-cell__u" }, unit) : null),
+        note ? h("span", { className: "uai-cell__note" }, note) : null);
     }
 
-    function SeatRow(key, seat) {
+    function seatRow(seat) {
       const held = Boolean(seat && seat.held);
       const pid = seat && seat.pid;
-      return h("div", {
-        key,
-        style: {
-          display: "grid", gridTemplateColumns: "1fr 72px 1fr", alignItems: "center",
-          height: T.row, padding: "0 " + T.pad, borderTop: "1px solid " + T.line,
-          fontSize: T.body, color: T.fg1, gap: T.gap,
-        },
-      },
-        h("span", { style: { fontWeight: 600 } }, key),
-        h("span", { style: { display: "inline-flex", alignItems: "center", gap: "5px", fontSize: T.small, color: T.fg2 } },
-          h("i", { style: { width: "6px", height: "6px", borderRadius: "50%", background: held ? T.green : T.fg3 } }),
+      return h("div", { className: "uai-row", key: seat.id },
+        h("span", { className: "uai-row__name" }, seat.id),
+        h("span", { className: "uai-row__state" },
+          h("i", { className: "uai-dot " + (held ? "uai-dot--on" : "uai-dot--off") }),
           held ? "运行中" : "未运行"),
-        h("span", { style: { fontFamily: T.mono, fontSize: T.small, color: T.fg3 } },
-          pid ? "pid " + pid : (seat && seat.why) || "-"));
+        h("span", { className: "uai-row__meta" }, pid ? "pid " + pid : (seat.why || "—")));
     }
 
     function Panel() {
@@ -90,175 +81,131 @@ window.__ModuleLoader__.load({
 
       const status = state.status || {};
       const hub = status.hub || {};
-      const seats = status.seats || {};
+      const seatsMap = status.seats || {};
       const processes = status.processes || {};
-      const seatNames = Object.keys(seats);
+      const seatList = Object.keys(seatsMap).map((id) => Object.assign({ id }, seatsMap[id]));
+      const running = seatList.filter((s) => s.held).length;
       const detect = state.detect || {};
+      const counts = detect.counts || {};
+      const readyIds = Array.isArray(detect.ready) ? detect.ready : [];
 
-      const btn = (label, onClick, primary) =>
-        h("button", {
-          onClick,
-          disabled: state.loading,
-          style: {
-            height: "30px", padding: "0 12px", borderRadius: "4px",
-            cursor: state.loading ? "default" : "pointer",
-            border: "1px solid " + (primary ? T.accent : T.line),
-            background: primary ? T.accent : "transparent",
-            color: primary ? "#04140A" : T.fg1,
-            fontWeight: primary ? 600 : 500, fontSize: T.body, fontFamily: T.sans,
-          },
-        }, label);
-
-      return h("div", { style: { background: T.bg1, color: T.fg1, fontFamily: T.sans, minHeight: "100%", fontSize: T.body } },
-        h("div", {
-          style: {
-            display: "flex", alignItems: "center", gap: T.gap, height: "52px", padding: "0 " + T.pad,
-            background: T.bg2, borderBottom: "1px solid " + T.line,
-          },
-        },
-          h("span", { style: { fontSize: T.title, fontWeight: 600 } }, "UAI 协作"),
-          h("span", {
-            style: { fontSize: T.micro, letterSpacing: ".14em", textTransform: "uppercase", color: T.fg2, border: "1px solid " + T.line, padding: "2px 6px" },
-          }, seatNames.length + " 席"),
-          h("span", { style: { marginLeft: "auto", display: "flex", gap: T.gap } },
-            btn(state.loading ? "检测中…" : "检测并搭建", runDetect, true),
-            btn("刷新", refresh))),
+      return h("div", { className: "uai-panel" },
+        h("div", { className: "uai-head" },
+          h("span", { className: "uai-title" }, "UAI 协作"),
+          h("span", { className: "uai-badge" }, seatList.length + " 席"),
+          h("span", { className: "uai-actions" },
+            h("button", {
+              className: "uai-btn uai-btn--primary",
+              type: "button",
+              disabled: state.loading,
+              onClick: runDetect,
+            }, state.loading ? "检测中…" : "检测并搭建"),
+            h("button", { className: "uai-btn", type: "button", disabled: state.loading, onClick: refresh }, "刷新"))),
 
         state.error
-          ? h("div", { style: { margin: T.pad, padding: T.pad, border: "1px solid " + T.red, color: T.red, fontSize: T.small } },
-              "桥接不可用：" + state.error)
+          ? h("div", { className: "uai-error" }, "桥接不可用：" + state.error)
           : null,
 
-        h("div", { style: { display: "flex", borderBottom: "1px solid " + T.line, background: T.bg2 } },
-          StatCell("中枢", hub.held ? "运行中" : "未运行", hub.held ? T.green : T.red),
-          StatCell("进程", (processes.hub || 0) + " hub / " + (processes.interface || 0) + " 席"),
-          StatCell("监督", processes.supervisor || 0, (processes.supervisor === 1) ? T.green : T.amber)),
+        h("div", { className: "uai-grid" },
+          cell("中枢", hub.held ? "运行中" : "未运行", hub.pid ? "pid " + hub.pid : "",
+            "单例锁由活进程持有", hub.held ? "uai-dot--on" : "uai-dot--off"),
+          cell("席位", running + "/" + seatList.length, "持有",
+            seatList.map((s) => s.id).join(" · ") || "尚未配置", null),
+          cell("监督", processes.supervisor || 0, "个 uai serve",
+            "看护任务每 2 分钟复查", (processes.supervisor === 1) ? "uai-dot--on" : "uai-dot--warn")),
 
-        h("div", {
-          style: {
-            display: "grid", gridTemplateColumns: "1fr 72px 1fr", padding: "0 " + T.pad, height: "28px",
-            alignItems: "center", background: T.bg2, borderBottom: "1px solid " + T.line,
-            fontSize: T.micro, letterSpacing: ".14em", textTransform: "uppercase", color: T.fg2,
-          },
-        }, h("span", null, "席位"), h("span", null, "状态"), h("span", null, "持有者")),
+        h("div", { className: "uai-section" },
+          h("div", { className: "uai-section__h" },
+            h("span", null, "席位持有者"),
+            h("span", null, running + " / " + seatList.length)),
+          seatList.length
+            ? seatList.map(seatRow)
+            : h("div", { className: "uai-empty" }, state.loading ? "读取中…" : "还没有席位配置（先跑 uai seats --from-detect）")),
 
-        seatNames.length
-          ? seatNames.map((k) => SeatRow(k, seats[k]))
-          : h("div", { style: { padding: T.pad, color: T.fg2, fontSize: T.small } },
-              state.loading ? "读取中…" : "还没有席位配置（先跑 uai seats --from-detect）"),
-
-        detect && detect.results
-          ? h("div", { style: { borderTop: "1px solid " + T.line, marginTop: T.pad } },
-              h("div", { style: { padding: "8px " + T.pad, fontSize: T.micro, letterSpacing: ".14em", textTransform: "uppercase", color: T.fg2 } }, "检测结果"),
-              detect.results.map((row) => h("div", {
-                key: row.id,
-                style: {
-                  display: "grid", gridTemplateColumns: "1fr 96px 1fr", alignItems: "center",
-                  height: "30px", padding: "0 " + T.pad, borderTop: "1px solid " + T.line, fontSize: T.small,
-                },
-              },
-                h("span", { style: { color: T.fg1 } }, row.label || row.id),
-                h("span", {
-                  style: {
-                    color: row.state === "ready" ? T.green : row.state === "auth_failed" ? T.amber : T.fg3,
-                    fontSize: T.micro, letterSpacing: ".1em", textTransform: "uppercase",
-                  },
-                }, row.state),
-                h("span", {
-                  style: { fontFamily: T.mono, fontSize: T.micro, color: T.fg3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-                }, row.binary || "-"))))
+        (readyIds.length || counts.ready !== undefined)
+          ? h("div", { className: "uai-section" },
+            h("div", { className: "uai-section__h" },
+              h("span", null, "能力矩阵"),
+              h("span", null, "就绪 " + (counts.ready || 0) + " / " + ((counts.ready || 0) + (counts.absent || 0)))),
+            h("div", { className: "uai-cap" },
+              readyIds.map((id) => h("span", { className: "uai-tag uai-tag--ready", key: id }, id))))
           : null);
     }
 
+    function PanelIcon() {
+      return h("span", {
+        "aria-hidden": "true",
+        style: {
+          display: "inline-block", width: "14px", height: "14px",
+          border: "1.5px solid currentColor", borderRadius: "3px",
+        },
+      });
+    }
 
-    function StatusCard(props) {
-      const T2 = T;
+    /** 思考链卡片：低预算档 —— 只有状态色与文字，不做入场动画。 */
+    function statusCard(props) {
       const phase = props && props.phase;
       const block = props && props.block;
       const result = (block && block.result) || null;
       const value = (result && result.value) || result || null;
       const ok = value && value.ok === true;
       const label = phase === "preparing" ? "调用中" : phase === "start" ? "执行中" : ok ? "完成" : "失败";
-      const color = phase === "preparing" || phase === "start" ? T2.amber : ok ? T2.green : T2.red;
-      const cells = [];
-      if (ok) {
-        cells.push(["中枢", value.hub_held ? "运行中" : "未运行", value.hub_held ? T2.green : T2.red]);
-        cells.push(["席位", String(value.seats_running) + "/" + String(value.seats), T2.fg1]);
-        cells.push(["监督", String(value.supervisor), value.supervisor === 1 ? T2.green : T2.amber]);
-      }
-      return h("div", {
-        style: {
-          border: "1px solid " + T2.line, background: T2.bg1, color: T2.fg1,
-          fontFamily: T2.sans, fontSize: T2.body, padding: "8px 12px",
-        },
-      },
-        h("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: cells.length ? "6px" : "0" } },
-          h("i", { style: { width: "6px", height: "6px", borderRadius: "50%", background: color } }),
-          h("span", { style: { fontWeight: 600 } }, "UAI 常驻面"),
-          h("span", { style: { marginLeft: "auto", fontSize: T2.micro, letterSpacing: ".1em", textTransform: "uppercase", color: color } }, label)),
-        cells.length
-          ? h("div", { style: { display: "flex", gap: "16px" } },
-              cells.map((cell) => h("div", { key: cell[0], style: { display: "flex", gap: "6px", alignItems: "baseline" } },
-                h("span", { style: { fontSize: T2.micro, letterSpacing: ".12em", textTransform: "uppercase", color: T2.fg2 } }, cell[0]),
-                h("span", { style: { color: cell[2], fontVariantNumeric: "tabular-nums" } }, cell[1]))))
-          : null,
-        !ok && value && value.summary
-          ? h("div", { style: { fontSize: T2.small, color: T2.fg2 } }, String(value.summary))
-          : null);
+      const dot = ok ? "uai-dot--on" : (phase === "preparing" || phase === "start") ? "uai-dot--warn" : "uai-dot--off";
+
+      return h("div", { className: "uai-panel", style: { border: "1px solid var(--uai-line)" } },
+        h("div", { className: "uai-head", style: { height: "34px", borderBottom: "none" } },
+          h("i", { className: "uai-dot " + dot }),
+          h("span", { className: "uai-title", style: { fontSize: "13px" } }, "UAI 常驻面"),
+          h("span", { className: "uai-badge", style: { marginLeft: "auto", borderColor: "transparent" } }, label)),
+        ok
+          ? h("div", { className: "uai-grid", style: { borderBottom: "none" } },
+            cell("中枢", value.hub_held ? "运行中" : "未运行", "", "", value.hub_held ? "uai-dot--on" : "uai-dot--off"),
+            cell("席位", (value.seats_running || 0) + "/" + (value.seats || 0), "持有", "", null),
+            cell("监督", value.supervisor, "个", "", value.supervisor === 1 ? "uai-dot--on" : "uai-dot--warn"))
+          : h("div", { className: "uai-empty" }, value && value.summary ? String(value.summary) : label));
     }
 
-
-    function DetectCard(props) {
+    function detectCard(props) {
       const phase = props && props.phase;
       const block = props && props.block;
       const result = (block && block.result) || null;
       const value = (result && result.value) || result || null;
       const ok = value && value.ok === true;
-      const label = phase === "preparing" ? "检测中" : phase === "start" ? "检测中" : ok ? "完成" : "失败";
-      const color = ok ? T.green : phase === "preparing" || phase === "start" ? T.amber : T.red;
-      const readyIds = value && value.ready_ids ? String(value.ready_ids).split(",").filter(Boolean) : [];
-      return h("div", {
-        style: {
-          border: "1px solid " + T.line, background: T.bg1, color: T.fg1,
-          fontFamily: T.sans, fontSize: T.body, padding: "8px 12px",
-        },
-      },
-        h("div", { style: { display: "flex", alignItems: "center", gap: "8px" } },
-          h("i", { style: { width: "6px", height: "6px", borderRadius: "50%", background: color } }),
-          h("span", { style: { fontWeight: 600 } }, "AI Agent 能力检测"),
-          h("span", { style: { marginLeft: "auto", fontSize: T.micro, letterSpacing: ".1em", textTransform: "uppercase", color: color } }, label)),
-        value && value.summary
-          ? h("div", { style: { marginTop: "6px", fontSize: T.small, color: T.fg2 } }, String(value.summary))
-          : null,
-        readyIds.length
-          ? h("div", { style: { marginTop: "6px", display: "flex", gap: "6px", flexWrap: "wrap" } },
-              readyIds.map((id) => h("span", {
-                key: id,
-                style: {
-                  fontSize: T.micro, letterSpacing: ".08em", textTransform: "uppercase",
-                  border: "1px solid " + T.line, color: T.fg1, padding: "1px 6px",
-                },
-              }, id)))
+      const label = phase === "preparing" || phase === "start" ? "检测中" : ok ? "完成" : "失败";
+      const dot = ok ? "uai-dot--on" : (phase === "preparing" || phase === "start") ? "uai-dot--warn" : "uai-dot--off";
+      const ids = value && value.ready_ids ? String(value.ready_ids).split(",").filter(Boolean) : [];
+
+      return h("div", { className: "uai-panel", style: { border: "1px solid var(--uai-line)" } },
+        h("div", { className: "uai-head", style: { height: "34px", borderBottom: "none" } },
+          h("i", { className: "uai-dot " + dot }),
+          h("span", { className: "uai-title", style: { fontSize: "13px" } }, "AI Agent 能力检测"),
+          h("span", { className: "uai-badge", style: { marginLeft: "auto", borderColor: "transparent" } }, label)),
+        value && value.summary ? h("div", { className: "uai-empty" }, String(value.summary)) : null,
+        ids.length
+          ? h("div", { className: "uai-cap" }, ids.map((id) => h("span", { className: "uai-tag uai-tag--ready", key: id }, id)))
           : null);
     }
 
-    function PanelIcon() {
-      return h("span", {
-        style: { display: "inline-block", width: "14px", height: "14px", border: "1.5px solid currentColor", borderRadius: "3px" },
-        "aria-hidden": "true",
-      });
+    function injectStyle() {
+      if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return;
+      const css = PANEL_CSS;
+      if (!css) return;
+      const el = document.createElement("style");
+      el.id = STYLE_ID;
+      el.textContent = css;
+      document.head.appendChild(el);
     }
 
     function apply(ctx) {
+      injectStyle();
       ctx.slots.inject("sidebar.panellist", () =>
         ctx.slots.register({ name: "sidebar.panellist", id: PANEL_ID, order: 5, label: () => "UAI 协作" }, PanelIcon));
       ctx.slots.inject("main", () =>
         ctx.slots.register({ name: "main", id: PANEL_ID }, Panel));
-      // 思考链里的自定义卡片：key 是 wire 工具名（必须与宿主注册的工具名一致）
       ctx.slots.inject("tool.call.toolview", () =>
-        ctx.slots.register({ name: "tool.call.toolview", key: "uai_status" }, StatusCard));
+        ctx.slots.register({ name: "tool.call.toolview", key: "uai_status" }, statusCard));
       ctx.slots.inject("tool.call.toolview", () =>
-        ctx.slots.register({ name: "tool.call.toolview", key: "uai_detect" }, DetectCard));
+        ctx.slots.register({ name: "tool.call.toolview", key: "uai_detect" }, detectCard));
     }
 
     return { apply, PANEL_ID, default: { apply } };

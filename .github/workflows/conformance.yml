@@ -53,6 +53,15 @@ jobs:
           python test_b02_ao_refs.py
           python test_p2_batch.py
 
+      - name: Panel design CSS in sync (bundle)
+        # 设计只有一份源：docs/design/ui-20261118-panel/panel.css。
+        # bundle 的 lib/panel-css.js 与 lib/client.js 内联区段都是生成物，
+        # 不同步就判红，防止「改了 CSS 忘了 build」导致线上样式与设计不符。
+        run: node packages/uai-dsh-bundle/scripts/build-css.mjs --check
+
+      - name: Bundle client self-test
+        run: node packages/uai-dsh-bundle/test/client-selftest.mjs
+
       - name: Core package self-tests (uai-core)
         working-directory: packages/uai-core
         run: python -m pytest tests -q 2>&1 | tee uai-core-pytest.log

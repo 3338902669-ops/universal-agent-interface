@@ -8,6 +8,7 @@ DSH 里的 UAI 协作面板：左侧栏一个「UAI 协作」页，显示中枢/
 | 文件 | 作用 |
 |---|---|
 | lib/index.js | 宿主侧插件：在 127.0.0.1:47311 开只读 HTTP 桥，把 uai status/detect/seats 转成 JSON（含 CORS） |
+| lib/panel-css.js | **生成物**：由 panel.css 编译而来（勿手改） |
 | cordis.patch.yml | bundle 的插件行声明（DSH 按 `dsh.profile.bundles` → 每个 bundle 的 patch → profile patch 的顺序合成） |
 | lib/client.js | 客户端插件：注册 sidebar.panellist 入口 + main 面板内容（window.__ModuleLoader__ 格式，React 由宿主提供） |
 | test/host-selftest.mjs | 不装进 DSH 也能验：桥启动、CORS、status JSON、404 |
@@ -16,6 +17,7 @@ DSH 里的 UAI 协作面板：左侧栏一个「UAI 协作」页，显示中枢/
 | scripts/install.ps1 | 一键安装（pnpm link + 写 bundles + 环境变量提示），幂等，改前备份 |
 | scripts/uninstall.ps1 | 一键卸载（移出 bundles + pnpm remove） |
 | scripts/patch-profile.mjs | 幂等维护 profile 的 dsh.profile.bundles（add/remove/check） |
+| scripts/build-css.mjs | 把 docs/design/ui-20261118-panel/panel.css 编译成 panel-css.js 并内联进 client.js（`--check` 供 CI 防漂移） |
 | scripts/compose-check.mjs | **静态**验证「DSH 会不会加载它」：按合成顺序把 patch 应用一遍，检查 uai-collab 行是否进树 |
 
 宿主注册两个工具：**uai_status**（常驻面：中枢/席位/监督）与 **uai_detect**（能力矩阵：就绪 N/M）。模型可以直接问，
@@ -23,6 +25,19 @@ DSH 里的 UAI 协作面板：左侧栏一个「UAI 协作」页，显示中枢/
 而不是一行 JSON。卡片各一张：`uai_status` → 中枢/席位/监督三格；`uai_detect` → 摘要 + 就绪 agent 标签。
 
 端点：/uai/ping、/uai/status、/uai/detect、/uai/seats。
+
+## 设计
+
+面板不是随手写的样式：**按《网页制作流程 v1》十阶段产出**，契约在
+[`docs/design/ui-20261118-panel/DESIGN.md`](../../docs/design/ui-20261118-panel/DESIGN.md)。
+
+- 概念：控制室仪表排（先看数，再看灯，最后才看字）；无卡片墙、无圆角、无发光
+- 令牌：`panel.css` 单一源，对比度实测 **12/12 达标**（`verify/contrast.mjs`）
+- 运动预算：**低档**（只有状态色 160ms / 按钮反馈 / 行 hover），reduce 下全 0
+- Tell Score：**3.8/100（A 级）**（`verify/preview-inlined.html`，检测器 ai-design-tells）
+- 范围：**看板只负责「看见」**，不承担派单/编排（那是工具与 hub 的职责）
+
+改样式：只改 `panel.css` → `node scripts/build-css.mjs` → 重新装/重启。CI 会跑 `--check` 拦漂移。
 
 ## 依赖
 
