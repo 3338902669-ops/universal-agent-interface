@@ -141,3 +141,39 @@ grep 实测（不含文档）的 Windows 强耦合点：
 1. 包名与作用域：`@uai/core`+`@uai/mcp`+`@uai/dsh-bundle`，或先本地 `file:` 装、确认可用再定名。
 2. 第一版支持哪些厂商：建议 codex + claude + rivet(天枢) + DSH 自身，其余按探测结果标 `unknown`。
 3. bundle 的 UI 骨架：手工写，还是先用 DSH 的 Creator 预设生成再改（我倾向核心手写、UI 用 Creator 生成）。
+
+## 13 视觉方向（2026-11-17，三个候选已出图）
+
+素材：`docs/design/ui-20261117/`（4 张截图 + 4 个静态 HTML，使用 DSH 自身令牌：neutral-bluish 灰阶、deepseek 蓝、radius 4/8/12/16、13–17px 密排节奏）。
+
+| 候选 | 形态 | 回答的问题 | 判断 |
+|---|---|---|---|
+| V1 控制台 | 席位卡栅格 + 账本尾 | 「都有谁、在不在、最近一次结果」 | **侧栏采用**：11 席在一屏内可读，窄到 360px 退化为单列 |
+| V2 指挥台 | 席位竖列 + 事件时间线 | 「此刻正在发生什么」 | **主区域采用**：派发/执行/裁定/待批四态一眼可见 |
+| V3 看板 | 四列任务泳道 | 「任务分布与阻塞」 | **不做**：DSH 自带 Agent Teams 的任务板已经覆盖，重复会在同一边界上分叉 |
+
+实现约束：UI 用 React + CSS Modules + `@deepseek-ai/dsh-client-ui-primitives`（StateDot / Tooltip / 图标）与 alias token；**不用 emoji 当图标**，草稿里的 ⚡/◐ 只是占位。
+
+## 14 目标 agent 矩阵（2026-11-17 本机实测）
+
+| 厂商 | 本机状态 | 接入方式 | 验证等级 |
+|---|---|---|---|
+| DSH | ✅ `dsh.cmd` 在 PATH | `dsh_adapter.py`（已有） | E1 |
+| Codex | ✅ `codex.ps1` | `codex_adapter.py`（已有） | E1 |
+| Claude Code | ✅ `claude.ps1` | 需新增 adapter（CLI 形态与 codex 类似） | E4 计划 |
+| 天枢 rivet | ✅ `rivet.ps1` | `tianshu_adapter.py`（已有） | E1 |
+| OpenClaw | ✅ `openclaw.ps1` | 需新增 adapter（有 MCP server 模式） | E4 计划 |
+| WorkBuddy | ❌ 未安装 | 需按官方 CLI 写 adapter | E4 计划 |
+| OpenCode | ❌ 未安装 | 需按官方 CLI 写 adapter | E4 计划 |
+| Trae | ❌ 未安装（GUI 为主） | GUI 型，可能需要唤醒/文件通道 | E4 计划 |
+| Cursor | ❌ 未安装 | MCP 客户端优先 | E4 计划 |
+| Gemini CLI | ❌ 未安装 | CLI adapter | E4 计划 |
+| Aider | ❌ 未安装 | CLI adapter | E4 计划 |
+| Ollama | ❌ 未安装 | 本地模型，按 HTTP 接口接入 | E4 计划 |
+
+**诚实结论**：10+ 家里有 5 家能在本机实测，其余 7 家只能先写「声明式适配器」并标 `unknown`，等装到对应机器上再升等级。
+检测必须能区分「没装」「装了但认证失败」「装了但版本不兼容」，否则界面上的绿点就是假的。
+
+## 15 命名（已定）
+
+作用域 `@uai/`：`@uai/core`、`@uai/mcp`、`@uai/dsh-bundle`；技能名 `uai-collab`。第一版先在本地以 `file:` 安装验证，再发布。
