@@ -23,7 +23,7 @@ from pathlib import Path
 
 from . import config, paths
 from .detect import detector
-from .oslayer import proc, service
+from .oslayer import creds, proc, service
 from .oslayer.lock import FileLock, SingletonError
 
 EXIT_ALREADY_RUNNING = 3
@@ -229,16 +229,46 @@ def _pythonw_path() -> str:
             return str(cand)
     return str(exe)
 
-def _spawn(cmd: list[str], log_path: Path) -> subprocess.Popen:
+
+
+def _as_env_keys(spec: dict) -> tuple[str, ...]:
+    """把 spec.env_keys 归一化成字符串元组（防「裸字符串被拆成单字符」）。"""
+    raw = spec.get("env_keys")
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        return (raw.strip(),) if raw.strip() else ()
+    if isinstance(raw, (list, tuple)):
+        return tuple(
+            str(k).strip() for k in raw if k is not None and str(k).strip()
+        )
+    return ()
+
+def _spawn(cmd: list[str], log_path: Path, env_keys: tuple[str, ...] = ()) -> subprocess.Popen:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
+    if env_keys:
+        extra, diag = creds.resolve(env_keys)
+        env.update(extra)
+        # 只记名字与命中状态，绝不记值
+        _print({"event": "credentials_injected", "keys": diag["injected"],
+                "missing": diag["missing"], "source": diag["source"]})
     env.setdefault("UAI_HOME", str(paths.uai_home()))
     env.setdefault("PYTHONUNBUFFERED", "1")
     handle = open(log_path, "a", encoding="utf-8")
     handle.write("\n=== spawn %s at %s ===\n" % (" ".join(cmd), time.strftime("%Y-%m-%dT%H:%M:%S")))
     handle.flush()
+    # 2026-11-18 修复空终端窗口：这里原先不传 creationflags。supervisor 由 pythonw.exe
+    # （GUI 子系统，无控制台）启动时，Windows 会给每一个控制台子进程（python.exe /
+    # nats-server.exe）新建一个可见控制台窗口——表现为桌面上一堆空白的 Windows Terminal。
+    # stdout/stderr 已重定向到 log_path，隐藏控制台不会丢失任何输出。
+    # 注意：升级 uai-core 会覆盖本改动，升级后需重新应用（备份见
+    # C:\Users\33389\plain\uai-fix-backup-20261118\cli.py）。
+    flags = 0
+    if service.platform_kind() == "windows":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     return subprocess.Popen(cmd, stdout=handle, stderr=subprocess.STDOUT,
-                            cwd=str(paths.uai_home()), env=env)
+                            cwd=str(paths.uai_home()), env=env, creationflags=flags)
 
 
 
@@ -366,7 +396,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     continue
                 log = paths.logs_dir() / (name + ".log")
                 try:
-                    child = _spawn(cmd, log)
+                    child = _spawn(cmd, log, _as_env_keys(spec))
                     children[name] = child
                     _print({"event": "spawned", "name": name, "child_pid": child.pid,
                             "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})

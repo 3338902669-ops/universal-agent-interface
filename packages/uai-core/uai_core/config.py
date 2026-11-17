@@ -61,6 +61,17 @@ def validate(cfg: dict) -> list[str]:
         if seat.get("enabled", True) and not seat.get("adapter") and not seat.get("command"):
             problems.append("seat %s has neither adapter nor command" % sid)
     for i, proc in enumerate(cfg.get("processes") or []):
+        env_keys = proc.get("env_keys")
+        # env_keys 必须是字符串列表：写成裸字符串会被 tuple(...) 拆成单字符变量名
+        # （codex 席位审代码实测：TUPLE_EXPANSION_COUNT 16）
+        if env_keys is not None:
+            if not isinstance(env_keys, list) or not all(
+                isinstance(k, str) and k.strip() for k in env_keys
+            ):
+                problems.append(
+                    "process %s env_keys must be a list of non-empty strings"
+                    % proc.get("name")
+                )
         cmd = proc.get("command")
         if not cmd or not isinstance(cmd, list):
             problems.append("processes[%d].command must be a list" % i)

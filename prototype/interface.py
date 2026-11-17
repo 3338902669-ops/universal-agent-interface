@@ -979,6 +979,45 @@ class InterfaceProcess:
             self.active_tasks.pop(task_id, None)
             asyncio.create_task(self.force_flush_outbox())
 
+
+    def _roster(self) -> tuple[list[str], str]:
+        """本机声明的席位名册。与监督器同源（seats.yml 的 seat 槽位），不新增协议。
+
+        为什么要注入这段：派单只传 instruction 时，agent 完全不知道自己在哪个框架里、
+        同伴是谁、自己这一手该交什么。实测（2026-11-18）问 dsh 席「你知道同伴吗」，
+        它回答 UNKNOWN —— 这就是「面板 4 席运行中」与「agent 真协作」之间的差。
+        """
+        try:
+            from uai_core import config as _cfg
+
+            cfg = _cfg.load(None)
+            ids = []
+            for spec in (cfg.get("processes") or []):
+                lock = str(spec.get("lock") or "")
+                if lock.startswith("seat:"):
+                    ids.append(lock.split(":", 1)[1])
+            if ids:
+                return sorted(set(ids)), "seats.yml"
+        except Exception:
+            pass
+        return [self.interface_id], "fallback"
+
+    def _preamble(self, envelope: dict[str, Any]) -> str:
+        """派单前言：一屏之内交代「你是谁 / 同伴有谁 / 分工口径 / 回执格式」。"""
+        seats, source = self._roster()
+        peers = [s for s in seats if s != self.interface_id]
+        peer_text = ", ".join(peers) if peers else "（本机未声明其他席位）"
+        cls = str(envelope.get("cls") or "readonly")
+        # 必须**单行**：dsh/codex/rivet 的 CLI 只把首个参数当 prompt，
+        # 带换行的前言会让它们只看到第一行（实测：三席都回「没有任务」）。
+        return (
+            "【UAI 协作上下文】你是 UAI 框架的 " + self.interface_id + " 席。"
+            "同一框架内声明的其他席位：" + peer_text + "（来源：" + source + "）。"
+            "分工口径（标准协作模式四件套）：实现 → 审代码 → 实测验 → 回读对账；谁实现谁不自审。"
+            "本次派单类别：" + cls + "；只做被要求的那一件事，不越权修改他人产物。"
+            "回执只输出结果正文（结论 + 依据），不写文件，不复述本段上下文。"
+        )
+
     async def execute_runtime(
         self, envelope: dict[str, Any]
     ) -> tuple[bytes, str]:
@@ -1002,7 +1041,7 @@ class InterfaceProcess:
             "--json",
             "-C",
             str(workdir),
-            envelope["instruction"],
+            envelope["instruction"] + " " + self._preamble(envelope),
         ]
         self.operation(
             task_id,
