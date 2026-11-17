@@ -66,6 +66,9 @@ new Function("window", source)(globalThis.window);
 check("client.js 注册进 __ModuleLoader__", loaded !== null && loaded.id === "@uai/dsh-bundle",
   loaded ? loaded.id : "none");
 check("模块导出 apply()", loaded && typeof loaded.exports.apply === "function");
+check("模块导出 inject 且含 slots（否则会早于 slots 服务激活）",
+  loaded && Array.isArray(loaded.exports.inject) && loaded.exports.inject.indexOf("slots") >= 0,
+  loaded ? JSON.stringify(loaded.exports.inject) : "none");
 
 // ---- 收集 slot 注册 ----
 const registrations = [];

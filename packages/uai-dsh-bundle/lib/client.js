@@ -197,18 +197,35 @@ const PANEL_CSS = "/* UAI 看板 · 设计令牌与样式（唯一源）\n * 生
       document.head.appendChild(el);
     }
 
-    function apply(ctx) {
-      injectStyle();
-      ctx.slots.inject("sidebar.panellist", () =>
-        ctx.slots.register({ name: "sidebar.panellist", id: PANEL_ID, order: 5, label: () => "UAI 协作" }, PanelIcon));
-      ctx.slots.inject("main", () =>
-        ctx.slots.register({ name: "main", id: PANEL_ID }, Panel));
-      ctx.slots.inject("tool.call.toolview", () =>
-        ctx.slots.register({ name: "tool.call.toolview", key: "uai_status" }, statusCard));
-      ctx.slots.inject("tool.call.toolview", () =>
-        ctx.slots.register({ name: "tool.call.toolview", key: "uai_detect" }, detectCard));
+    /** 注册一个 slot；单点失败不能拖垮整块 UI，且必须在 DevTools 里留痕。 */
+    function reg(ctx, name, factory, what) {
+      try {
+        ctx.slots.inject(name, factory);
+      } catch (error) {
+        (globalThis.console || {}).warn("[uai-collab] slot 注册失败 " + what + ": " + String(error));
+      }
     }
 
-    return { apply, PANEL_ID, default: { apply } };
+    function apply(ctx) {
+      injectStyle();
+      reg(ctx, "sidebar.panellist", () =>
+        ctx.slots.register({ name: "sidebar.panellist", id: PANEL_ID, order: 5, label: () => "UAI 协作" }, PanelIcon), "sidebar.panellist");
+      reg(ctx, "main", () =>
+        ctx.slots.register({ name: "main", id: PANEL_ID }, Panel), "main");
+      reg(ctx, "tool.call.toolview", () =>
+        ctx.slots.register({ name: "tool.call.toolview", key: "uai_status" }, statusCard), "tool.call.toolview/uai_status");
+      reg(ctx, "tool.call.toolview", () =>
+        ctx.slots.register({ name: "tool.call.toolview", key: "uai_detect" }, detectCard), "tool.call.toolview/uai_detect");
+    }
+
+    /**
+     * 客户端 fiber 的服务依赖：**必须导出**。
+     * 对照 DSH 自带客户端插件（ui-goal / ui-jobs / ui-plugin-manager）都是
+     * exports.inject = ['slots', ...]。不导出的后果是插件在 slots 服务存在之前就被激活，
+     * ctx.slots 为 undefined，整个 apply 抛错 → 界面什么都不出现（宿主侧却一切正常）。
+     */
+    const inject = ["slots"];
+
+    return { apply, inject, PANEL_ID, default: { apply, inject } };
   },
 });
