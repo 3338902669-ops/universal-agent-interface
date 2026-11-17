@@ -49,10 +49,10 @@ body{margin:0;padding:20px;background:#0B0F1A;font-family:var(--sans);color:var(
 .srow{display:flex;align-items:center;gap:var(--gap);height:32px;padding:0 var(--pad);border-bottom:1px solid var(--line)}
 .srow .svd{margin-left:auto;font-size:var(--fs-micro);letter-spacing:.1em;text-transform:uppercase;color:var(--fg2)}
 .feed{padding:var(--pad)}
-.ev{display:grid;grid-template-columns:14px 1fr;gap:10px;padding-bottom:14px;position:relative}
-.ev:before{content:'';position:absolute;left:6px;top:14px;bottom:0;width:1px;background:var(--line)}
+.ev{display:grid;grid-template-columns:13px 1fr;gap:11px;padding-bottom:14px;position:relative}
+.ev:before{content:'';position:absolute;left:6px;top:15px;bottom:-1px;width:1px;background:var(--line)}
 .ev:last-child:before{display:none}
-.ev .ic{width:13px;height:13px;border:1px solid var(--line);display:grid;place-items:center;font-size:8px;color:var(--fg2);background:var(--bg1);position:relative;z-index:1}
+.ev .ic{width:13px;height:13px;border:1px solid var(--line);display:grid;place-items:center;font:600 8px/1 var(--mono);color:var(--fg2);background:var(--bg1);position:relative;z-index:1}
 .ev .l1{display:flex;gap:6px;align-items:center;font-size:var(--fs-body);flex-wrap:wrap}
 .ev .l2{color:var(--fg2);font-size:var(--fs-small);margin-top:3px}
 .ev code{font-family:var(--mono);font-size:var(--fs-small);color:var(--fg1)}
