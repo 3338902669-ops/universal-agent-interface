@@ -170,8 +170,8 @@
 | reduce | `@media (prefers-reduced-motion: reduce)` 全 0 | 已实现 |
 | 键盘焦点 | `:focus-visible` 2px 绿环 + 2px offset | 已实现 |
 | 状态双编码 | 点 + 文字（「运行中/未运行」） | 已实现（不只靠颜色） |
-| Tell Score | 见 `verify/tell-score.md` | 见该文件 |
-| 视觉 loop | 截图两跑 | **未做**：本轮无可用截图工具（Playwright 未安装、ego 未经本会话验证）；按流程规定标注「未做视觉人工复核」 |
+| Tell Score | `ai-design-tells` CLI | **3.8/100（A 级）**（内联版；外链版 13.5/B 属检测器读不到样式） |
+| 视觉 loop | ego-browser 截图四跑 | **完成**：每跑写三个最差 → 修 → 重看，详见 `verify/acceptance.md` §2 |
 
 ---
 
@@ -186,4 +186,4 @@
 | 5 | 素材清单 | 无图片素材（有意）；字体为系统字 |
 | 6 | 客户操作说明 | 见 `packages/uai-dsh-bundle/README.md` |
 
-**没做的（如实）**：视觉 loop 两跑、六门禁中的 console/动效存在性/键盘实测 —— 都依赖真实浏览器，标注为 E4。
+**没做的（如实）**：六门禁 4/5/6（console、动效帧差、Tab 实测）在静态页上无法完整做——面板本体在 DSH 内由 React 渲染，需要装 bundle 重启后在 DSH 内验；标注 E4。

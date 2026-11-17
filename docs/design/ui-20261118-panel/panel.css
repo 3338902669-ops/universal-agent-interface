@@ -64,7 +64,7 @@
 
 /* ── 顶栏：标题 + 计数徽标 + 两个动作 ───────────────────────────── */
 .uai-head {
-  display: flex; align-items: center; gap: var(--uai-s2);
+  display: flex; align-items: center; gap: 10px;
   height: 52px; padding: 0 var(--uai-s3);
   background: var(--uai-bg2);
   border-bottom: 1px solid var(--uai-line);
@@ -88,8 +88,8 @@
 .uai-btn:hover:not(:disabled) { background: var(--uai-bg3); border-color: var(--uai-fg3); }
 .uai-btn:active:not(:disabled) { transform: translateY(1px); }
 .uai-btn:disabled { opacity: 0.55; cursor: default; }
-.uai-btn--primary { background: var(--uai-accent); border-color: var(--uai-accent); color: var(--uai-accent-ink); font-weight: 600; }
-.uai-btn--primary:hover:not(:disabled) { background: #1FBF57; border-color: #1FBF57; }
+.uai-btn--primary { background: var(--uai-bg3); border-color: var(--uai-line-2); color: var(--uai-fg1); font-weight: 600; }
+.uai-btn--primary:hover:not(:disabled) { background: #232841; border-color: var(--uai-fg3); }
 
 /* 焦点：键盘可见，不靠颜色单独传达 */
 .uai-panel :focus-visible {
@@ -135,7 +135,8 @@
 
 .uai-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px minmax(0, 132px);
+  /* 四列：名字 / 状态 / 锁来源 / pid（pid 贴右端，锁源紧跟状态，避免串成一句话） */
+  grid-template-columns: minmax(0, 200px) 88px minmax(0, 132px) minmax(0, 1fr);
   align-items: center; gap: var(--uai-s3);
   height: var(--uai-row); padding: 0 var(--uai-s3);
   border-top: 1px solid var(--uai-line);
@@ -145,6 +146,7 @@
 .uai-row__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .uai-row__state { display: inline-flex; align-items: center; gap: 6px; font-size: var(--uai-fs-sm); color: var(--uai-fg2); }
 .uai-row__meta { font-family: var(--uai-mono); font-size: var(--uai-fs-sm); color: var(--uai-fg3); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uai-row__src { font-family: var(--uai-mono); font-size: var(--uai-fs-micro); color: var(--uai-fg3); letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 状态灯：形状 + 颜色双编码（不只靠颜色） */
 .uai-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; background: var(--uai-fg3); }
@@ -153,7 +155,9 @@
 .uai-dot--off { background: var(--uai-red); }
 
 /* ── 检测结果：标签 + 状态 + 路径 ───────────────────────────── */
-.uai-cap { display: flex; flex-wrap: wrap; gap: var(--uai-s1); padding: var(--uai-s2) var(--uai-s3); }
+.uai-section--alt { background: var(--uai-bg2); }
+.uai-section--alt .uai-section__h { background: transparent; border-bottom: 1px solid var(--uai-line); }
+.uai-cap { display: flex; flex-wrap: wrap; gap: var(--uai-s1); padding: var(--uai-s3); background: var(--uai-bg3); }
 .uai-tag {
   font-family: var(--uai-mono); font-size: var(--uai-fs-micro); letter-spacing: 0.06em;
   border: 1px solid var(--uai-line); color: var(--uai-fg2);
@@ -171,7 +175,8 @@
 @media (max-width: 560px) {
   .uai-grid { grid-template-columns: minmax(0, 1fr); }
   .uai-row { grid-template-columns: minmax(0, 1fr) auto; height: auto; padding: 8px var(--uai-s3); row-gap: 2px; }
-  .uai-row__meta { grid-column: 1 / -1; text-align: left; }
+  .uai-row__src { grid-column: 1 / -1; grid-row: 2; }
+  .uai-row__meta { grid-column: 1 / -1; grid-row: 3; text-align: left; }
   .uai-head { height: auto; padding: 8px var(--uai-s3); flex-wrap: wrap; }
   .uai-actions { margin-left: 0; width: 100%; }
   .uai-btn { flex: 1 1 auto; }
