@@ -187,6 +187,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     def _stop(signum, frame):
         stopping["flag"] = True
+        _print({"event": "supervisor_signal", "signum": signum,
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
 
     for name in ("SIGINT", "SIGTERM"):
         try:
@@ -194,6 +196,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         except Exception:
             pass
 
+    exit_reason = "loop_end"
     _print({"ok": True, "event": "supervisor_started", "pid": os.getpid(),
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "processes": [p.get("name") for p in procs]})
@@ -241,7 +244,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     continue
                 log = paths.logs_dir() / (name + ".log")
                 try:
-                    children[name] = _spawn(cmd, log)
+                    child = _spawn(cmd, log)
+                    children[name] = child
+                    _print({"event": "spawned", "name": name, "child_pid": child.pid,
+                            "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
                 except Exception as exc:
                     _print({"event": "spawn_failed", "name": name, "error": str(exc)[:200]})
                     waits[name] = now + max_backoff
@@ -250,8 +256,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     slot_backoff[name] = base_backoff
             try:
                 guard.heartbeat()
-            except SingletonError:
-                _print({"event": "lost_supervisor_lock"})
+            except SingletonError as exc:
+                exit_reason = "lost_supervisor_lock:%s" % exc
+                _print({"event": "lost_supervisor_lock", "error": str(exc)[:120],
+                        "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
                 break
             time.sleep(max(1.0, args.poll_s))
     finally:
@@ -270,6 +278,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 except Exception:
                     pass
         guard.release()
+        _print({"event": "supervisor_exit", "pid": os.getpid(), "reason": exit_reason,
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
     return 0
 
 

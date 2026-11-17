@@ -29,7 +29,6 @@ sys.path.insert(0, str(HERE))
 import hub_singleton as HS          # noqa: E402
 import resident_health as RH        # noqa: E402
 
-VBS = r"C:\Users\33389\.shared\uai-hub\start-uai-hub.vbs"
 PASSES, FAILS = [], []
 
 
@@ -127,9 +126,6 @@ def fire_autostart() -> tuple[bool, str]:
             errors.append("%s: %s" % (cand.name, str(exc)[:120]))
     print("    autostart FAILED: " + " | ".join(errors))
     return False, "; ".join(errors)
-
-def fire_autostart():
-    subprocess.run(["wscript.exe", VBS], timeout=60)
 
 
 def lock_pid(base: Path, name: str, ns: str):
