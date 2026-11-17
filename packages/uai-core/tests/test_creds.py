@@ -56,3 +56,10 @@ def test_injected_value_is_not_trimmed(monkeypatch) -> None:
 def test_env_key_names_with_equals_or_nul_are_dropped() -> None:
     """非法变量名（含 = 或 NUL）必须丢弃（FAIL 第 3 条）。"""
     assert _as_env_keys({"env_keys": ["A", "B=C", "D\x00E", "  "]}) == ("A",)
+
+def test_drop_reasons_include_real_hub_strings() -> None:
+    """hub 真实的拒绝词是 fencing_stale（不是 fencing_rejected）——codex 审代码第 2 条。"""
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1] / ".." / ".." / "prototype" / "interface.py")
+    text = src.read_text(encoding="utf-8", errors="replace")
+    for reason in ("seq_gap", "task_not_found", "task_terminal", "fencing_stale"):
+        assert reason in text, reason

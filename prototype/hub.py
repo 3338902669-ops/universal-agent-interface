@@ -1594,10 +1594,25 @@ class Hub:
             if not seqs:
                 continue
             highest = max(seqs)
-            missing = [seq for seq in range(1, highest + 1) if seq not in seqs]
-            if missing:
-                gaps.append({"task_id": task.task_id, "missing": missing[:50],
-                             "missing_count": len(missing)})
+            # 不物化完整缺失列表：seq 异常大时 range(1, highest+1) 会长时间占用事件循环。
+            # 只在必要范围内扫描并提前截断（codex 审代码第 3 条）。
+            scan_ceiling = min(highest, 10000)
+            missing: list[int] = []
+            missing_count = 0
+            for seq in range(1, scan_ceiling + 1):
+                if seq in seqs:
+                    continue
+                missing_count += 1
+                if len(missing) < 50:
+                    missing.append(seq)
+            truncated = highest > scan_ceiling
+            if missing_count or truncated:
+                # 不把未扫描的序号算成缺失（那会高估），单独用 truncated/unscanned 标注
+                gaps.append({"task_id": task.task_id, "missing": missing,
+                             "missing_count": missing_count,
+                             "scanned_to": scan_ceiling,
+                             "truncated": truncated,
+                             "unscanned": max(0, highest - scan_ceiling)})
         self.record(
             "RECONCILIATION",
             gap_count=len(gaps),

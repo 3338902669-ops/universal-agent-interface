@@ -628,6 +628,47 @@ class InterfaceProcess:
         async with self.outbox_lock:
             return await self._flush_once_locked()
 
+    async def _flush_one_event(self, row: dict[str, Any]) -> bool:
+        """投递**单条**事件。claim 用它在认领前冲掉本任务的积压，
+        避免 force_flush_outbox() 的全局阻塞（codex 审代码第 1 条）。"""
+        if not self.nc or not self.nc.is_connected:
+            return False
+        event = {
+            "task_id": row["task_id"],
+            "trace_id": row["trace_id"],
+            "seq": row["seq"],
+            "fencing_generation": row["fencing_generation"],
+            "kind": row["kind"],
+            "payload": row["payload"],
+            "created_at": row["created_at"],
+        }
+        request = make_proof(self.token, {
+            "kind": "event",
+            "interface_id": self.interface_id,
+            "event": event,
+            "sent_at": now_iso(),
+        })
+        try:
+            reply = await self.nc.request("hub.event", canonical_json(request),
+                                         timeout=self.event_timeout_s)
+            response = json.loads(reply.data.decode("utf-8"))
+        except Exception:
+            return False
+        if response.get("ok"):
+            self.state.ack_event(row["event_id"], True, response)
+            return True
+        reason = str(response.get("reason"))
+        if reason in ("seq_gap", "task_not_found", "unknown_task", "task_terminal",
+                     "fencing_stale", "fencing_rejected"):
+            self.state.ack_event(row["event_id"], True,
+                                 {"dropped": True, "reason": reason})
+            self.log_connection("event_dropped", task_id=row["task_id"],
+                                seq=row["seq"], reason=reason)
+            return True
+        self.state.ack_event(row["event_id"], False, response)
+        return False
+
+
     async def _flush_once_locked(self) -> bool:
         if not self.nc or not self.nc.is_connected:
             return False
@@ -674,6 +715,7 @@ class InterfaceProcess:
                         "task_not_found",
                         "unknown_task",
                         "task_terminal",
+                        "fencing_stale",   # hub 实际返回的是这个词（codex 审出我写错成 fencing_rejected）
                         "fencing_rejected",
                     ):
                         self.state.ack_event(
@@ -741,12 +783,18 @@ class InterfaceProcess:
             },
         )
         try:
-            # backlog 只阻塞**同一任务**的认领：别的任务的积压不该让本席罢工。
-            backlog = self.state.pending_events()
-            if backlog:
-                await self.force_flush_outbox()
-                if any(row["task_id"] == task_id for row in self.state.pending_events()):
+            # 只冲**本任务**的积压，绝不调 force_flush_outbox()：
+            # 那会循环到所有任务的事件清空，等于把全局阻塞加回来（codex 两轮审出）。
+            pending_for_task = [
+                row for row in self.state.pending_events()
+                if row["task_id"] == task_id
+            ][:20]
+            for row in pending_for_task:
+                if not await self._flush_one_event(row):
                     return None
+            if any(row["task_id"] == task_id for row in self.state.pending_events()):
+                return None
+
             reply = await self.nc.request(
                 "hub.claim", canonical_json(request), timeout=3
             )
