@@ -239,9 +239,17 @@ def _as_env_keys(spec: dict) -> tuple[str, ...]:
     if isinstance(raw, str):
         return (raw.strip(),) if raw.strip() else ()
     if isinstance(raw, (list, tuple)):
-        return tuple(
-            str(k).strip() for k in raw if k is not None and str(k).strip()
-        )
+        # 环境变量名不能含 '=' 或 NUL（第 3 条）：这种名字会让 _spawn 每次都失败并无限退避，
+        # 宁可在归一化阶段直接丢弃。
+        cleaned = []
+        for k in raw:
+            if k is None:
+                continue
+            name = str(k).strip()
+            if not name or "=" in name or "\x00" in name:
+                continue
+            cleaned.append(name)
+        return tuple(cleaned)
     return ()
 
 def _spawn(cmd: list[str], log_path: Path, env_keys: tuple[str, ...] = ()) -> subprocess.Popen:

@@ -39,6 +39,7 @@ def _from_registry(names: tuple[str, ...]) -> dict[str, str]:
                     value, _ = winreg.QueryValueEx(key, name)
                 except OSError:
                     continue
+                # 同样：判空用 strip，取原值（第 2 条：登记了就不该再裁剪）
                 if isinstance(value, str) and value.strip():
                     out[name] = value
     except OSError:
@@ -58,8 +59,10 @@ def resolve(names) -> tuple[dict[str, str], dict[str, object]]:
         value = os.environ.get(name)
         # 空白字符串不算「有值」：否则一个 "   " 就会挡掉注册表回退，
         # 子进程拿到空 key → 运行时 MISSING_CREDENTIAL（codex 审查实测指出）
+        # 判空用 strip，但**注入原值**：改值会破坏「宿主已有值优先、不覆盖」的约定，
+        # 也会裁掉合法密钥的首尾字符（codex 席位审代码 FAIL 第 1 条）。
         if value is not None and value.strip():
-            injected[name] = value.strip()
+            injected[name] = value
             sources.add("env")
     missing = [n for n in wanted if n not in injected]
     if missing:

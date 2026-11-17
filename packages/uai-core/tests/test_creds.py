@@ -44,3 +44,15 @@ def test_diag_never_contains_values(monkeypatch) -> None:
     injected, diag = creds.resolve(("UAI_TEST_SECRET",))
     assert injected["UAI_TEST_SECRET"] == "super-secret-value"
     assert "super-secret-value" not in str(diag)
+
+
+def test_injected_value_is_not_trimmed(monkeypatch) -> None:
+    """宿主已有值优先且不覆盖：注入必须是原值（codex 审代码 FAIL 第 1 条）。"""
+    monkeypatch.setenv("UAI_TEST_RAW", "  keep-spaces  ")
+    injected, _ = creds.resolve(("UAI_TEST_RAW",))
+    assert injected["UAI_TEST_RAW"] == "  keep-spaces  "
+
+
+def test_env_key_names_with_equals_or_nul_are_dropped() -> None:
+    """非法变量名（含 = 或 NUL）必须丢弃（FAIL 第 3 条）。"""
+    assert _as_env_keys({"env_keys": ["A", "B=C", "D\x00E", "  "]}) == ("A",)
