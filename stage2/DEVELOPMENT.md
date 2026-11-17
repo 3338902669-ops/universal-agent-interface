@@ -31,7 +31,7 @@
 | `identity.py` OidcVerifier | **JWT 真验签**（RS256/ES256+exp/nbf/iss/aud+kid 严格） | `test_eoidc_jwt.py` **8/8** |
 | `a2a_server.py` _stream_events | **SSE 事件流出站**（/tasks/<id>/events） | `test_a07_sse_stream.py` **3/3**（需 lab） |
 
-合计 **364 条用例**（本地全绿）。2026-11-17 追加：A-09 真并发 + 入口守卫（`test_a09_singleton.py` 13→28）、B-01 轮次 25 条（`test_b01_rounds.py`）、UAI-08 图谱写入 21 条（`test_uai08_graph_write.py`）、UAI-09 归档 36 条（`test_uai09_ledger_archive.py`）、席位心跳循环 8 条（`test_seat_heartbeat_loop.py`）。常驻面另有两个非用例脚本：`resident_health.py`（自检）与 `drill_resident_plane.py`（演练 14/14）。原 259 条基线未变。`test_a02_inbound.py` 需要真 nats+hub lab；CI 里由
+**核心套件 368 条用例全绿**（2026-11-17 实测，16 个文件）。stage2 共 53 个 `test_*.py`，其余多为需真 lab（NATS+hub）或真实外部依赖的套件，按需单独跑。2026-11-17 追加：A-09 真并发 + 入口守卫（`test_a09_singleton.py` 13→28）、B-01 轮次 25（`test_b01_rounds.py`）、UAI-08 图谱写入 21（`test_uai08_graph_write.py`）、UAI-09 归档 36（`test_uai09_ledger_archive.py`）、席位心跳循环 8（`test_seat_heartbeat_loop.py`）。常驻面另有两个非用例脚本：`resident_health.py`（自检 14 项）与 `drill_resident_plane.py`（演练 14/14）。
 `../bench/lab.py` 先把 lab 拉起来**真跑**（workflow 里有硬门：该套件若被 skip 即判红）。
 协议侧另有 `../protocol/tests/conformance/` **22 项**；`../protocol/GAR-OPEN-ITEMS-REF.md` 记录了
 C-06~C-10 这些**必须由 GAR 侧闭合**的项及验收口径。
