@@ -8,6 +8,7 @@ DSH 里的 UAI 协作面板：左侧栏一个「UAI 协作」页，显示中枢/
 | 文件 | 作用 |
 |---|---|
 | lib/index.js | 宿主侧插件：在 127.0.0.1:47311 开只读 HTTP 桥，把 uai status/detect/seats 转成 JSON（含 CORS） |
+| cordis.patch.yml | bundle 的插件行声明（DSH 按 `dsh.profile.bundles` → 每个 bundle 的 patch → profile patch 的顺序合成） |
 | lib/client.js | 客户端插件：注册 sidebar.panellist 入口 + main 面板内容（window.__ModuleLoader__ 格式，React 由宿主提供） |
 | test/host-selftest.mjs | 不装进 DSH 也能验：桥启动、CORS、status JSON、404 |
 | test/tool-selftest.mjs | 验两个工具 uai_status / uai_detect：注册、参数表、输出 schema、execute 摘要与字段 |
@@ -77,3 +78,34 @@ node test/client-selftest.mjs
 2. **卡片只对 uai_status 生效**：其余 UAI 动作还没有卡片（等派单工具做出来再逐个加）；
 3. **安装需要重启 DSH**：插件安装没有 HMR（restart-required），所以没有直接装进正在使用的 profile；
 4. **桥没有鉴权**：只监听 127.0.0.1，同机进程可读；不暴露任何写操作（没有起停接口）。
+
+## 安装后在 DSH 里发生什么（加载路径，已核过）
+
+```
+profile/cordis.yml []                      <- 空入口表
+  ↑ 合成顺序：
+  1) dsh.profile.bundles 里每个 bundle 的 dsh.bundle.patch
+     → @uai/dsh-bundle/cordis.patch.yml 插入 { id: uai-collab, name: @uai/dsh-bundle, config.port }
+  2) profile/cordis.patch.yml（用户的 patch 层，后应用，可覆盖/禁用）
+  3) --patch 覆盖层
+```
+
+宿主插件启动后：监听 127.0.0.1:47311 + 注册 uai_status / uai_detect 两个工具；
+客户端装载器按 package.json 的 `dsh.client.platform` 与 `exports["./client"]` 加载侧栏面板与两张卡片。
+
+### 重启后 30 秒验收清单
+
+```powershell
+# 1) 桥起来了（宿主插件已加载）
+Invoke-WebRequest http://127.0.0.1:47311/uai/ping -UseBasicParsing | Select-Object -Expand Content
+# 期望 {"ok":true,"service":"uai-collab",...}
+
+# 2) 状态可读（核心命令 + 数据面配对环境变量后）
+Invoke-WebRequest http://127.0.0.1:47311/uai/status -UseBasicParsing | Select-Object -Expand Content | Select-Object -First 1
+
+# 3) 侧栏出现「UAI 协作」，点开是 中枢/进程/监督 + 席位表 + 两个按钮
+# 4) 新会话里让助手调 uai_status / uai_detect，思考链里应是两张卡而不是一行 JSON
+```
+
+参考：`@deepseek-ai/dsh-experimental-voice-input-bundle` 的 `dsh.bundle.patch` + `cordis.patch.yml`，
+本包按同一形状写（这是 DSH 认 bundle 的唯一入口，缺了就会「装上了但不起作用」）。

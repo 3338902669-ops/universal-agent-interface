@@ -9,7 +9,10 @@
  * 为什么不用 typert/remote：那套要跟着 DSH 版本走，第三方包会被版本绑死。
  * HTTP + JSON 是稳定契约。
  */
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -69,10 +72,34 @@ export async function uaiStatusSummary() {
 export async function registerTool(ctx, defineToolOverride) {
   let defineTool = defineToolOverride;
   if (defineTool === undefined) {
-    try {
-      ({ defineTool } = await import("@deepseek-ai/dsh-tools"));
-    } catch (error) {
-      ctx?.logger?.info?.("[uai-collab] dsh-tools unavailable, tool not registered: " + String(error).slice(0, 120));
+    const candidates = ["@deepseek-ai/dsh-tools"];
+    // link 安装时包还在仓库里，Node 会从仓库路径往上找 node_modules，找不到 DSH 的包；
+    // 所以再按 DSH profile 的实际位置补几个候选（可用 UAI_DSH_TOOLS_PATH 覆盖）。
+    const envPath = process.env.UAI_DSH_TOOLS_PATH;
+    if (envPath) candidates.push(pathToFileURL(envPath).href);
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    if (home) {
+      const profiles = path.join(home, ".dsh", "profiles");
+      try {
+        for (const name of fs.readdirSync(profiles)) {
+          const lib = path.join(profiles, name, "node_modules", "@deepseek-ai", "dsh-tools", "lib", "index.js");
+          if (fs.existsSync(lib)) candidates.push(pathToFileURL(lib).href);
+        }
+      } catch {
+        /* profiles 目录不可读就算了 */
+      }
+    }
+    const errors = [];
+    for (const specifier of candidates) {
+      try {
+        ({ defineTool } = await import(specifier));
+        break;
+      } catch (error) {
+        errors.push(specifier + ": " + String(error).slice(0, 80));
+      }
+    }
+    if (typeof defineTool !== "function") {
+      ctx?.logger?.info?.("[uai-collab] dsh-tools unavailable, tool not registered: " + errors.join(" | ").slice(0, 200));
       return false;
     }
   }

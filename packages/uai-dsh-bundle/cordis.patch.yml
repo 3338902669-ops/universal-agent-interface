@@ -1,0 +1,8 @@
+# 本包作为 DSH bundle 的插件行声明。
+# 客户端能力（侧栏面板 + tool.call.toolview 卡片）由同一个包的 ./client 导出提供，
+# DSH 的客户端装载器按 dsh.client 找到它，不需要单独一行。
+- insert:
+    - id: uai-collab
+      name: '@uai/dsh-bundle'
+      config:
+        port: 47311

@@ -119,10 +119,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     _print({
         "hub": hub_status,
         "seats": seats,
+        # name_prefix 必须带上：宿主应用/调试脚本的命令行里可能带着这些字样
+        # （例如 node -e 里写了 uai_core serve），只按子串数会把它们算成进程。
         "processes": {
-            "hub": proc.count(contains=("hub.py",)),
-            "interface": proc.count(contains=("interface.py",)),
-            "supervisor": proc.count(contains=("uai_core", "serve")),
+            "hub": proc.count(contains=("hub.py",), name_prefix=("python",)),
+            "interface": proc.count(contains=("interface.py",), name_prefix=("python",)),
+            "supervisor": proc.count(contains=("uai_core", "serve"), name_prefix=("python",)),
         },
     })
     return 0
