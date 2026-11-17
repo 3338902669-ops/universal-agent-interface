@@ -250,7 +250,9 @@ class InterfaceProcess:
         self.runtime_executable = runtime_executable
         self.data_dir = base / "runtime" / "interfaces" / safe_id(interface_id)
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.work_dir = self.data_dir / "work"
+        # work_root 给定时任务目录放在它下面（同一沙箱边界内）
+        self.work_root = Path(work_root) if work_root else None
+        self.work_dir = (self.work_root / ".uai-work") if self.work_root else (self.data_dir / "work")
         self.results_dir = self.data_dir / "results"
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -1152,6 +1154,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-concurrency", type=int, default=2)
     parser.add_argument("--disable-heartbeat", action="store_true")
     parser.add_argument("--suppress-echo", action="store_true")
+    parser.add_argument(
+        "--work-root",
+        type=Path,
+        default=None,
+        help="任务工作目录根：给了就在 <root>/.uai-work/<task_id> 下跑，"
+        "使受限 runtime（rivet 沙箱）能访问该根内的仓库；不给则沿用 base 下空目录",
+    )
     parser.add_argument("--executor", choices=["runtime", "test"], default="test")
     parser.add_argument(
         "--runtime-executable",
@@ -1246,6 +1255,7 @@ def main() -> int:
         suppress_echo=args.suppress_echo,
         executor=args.executor,
         runtime_executable=args.runtime_executable,
+        work_root=args.work_root,
     )
     try:
         asyncio.run(process.run())
