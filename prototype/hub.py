@@ -450,12 +450,20 @@ class Hub:
         request = self._decode(msg)
         interface_id = str((request or {}).get("interface_id", ""))
         session = self.sessions.get(interface_id)
-        if (
-            not request
-            or not session
-            or not session.token
-            or not verify_proof(session.token, request)
-        ):
+        if not request:
+            self.json_response(msg, {"ok": False, "reason": "malformed"})
+            return
+        if not session:
+            # 中枢重启后席位还在跑：它们的内存里 registered 仍是 True。
+            # 只回 unauthorized 的话席位不会动作（实测 80s 都不回来），必须明确
+            # 让它重新注册——这是"中枢单独重启后完全没有可用席位"的根因。
+            # 这里不写账本：未知席位每 2s 一次心跳会淹掉账本。
+            self.json_response(
+                msg,
+                {"ok": False, "reason": "unknown_session", "must_register": True},
+            )
+            return
+        if not session.token or not verify_proof(session.token, request):
             self.json_response(msg, {"ok": False, "reason": "unauthorized"})
             return
         session.last_heartbeat = time.monotonic()

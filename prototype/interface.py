@@ -407,10 +407,15 @@ class InterfaceProcess:
             return self.registered
 
     async def heartbeat_loop(self) -> None:
+        sent = 0                     # 已发送心跳计数（用于限频日志）
+        ticks = 0                    # 循环轮次（未连接时也计数，用于限频）
         while not self.stop_event.is_set():
             try:
                 await asyncio.sleep(self.heartbeat_s)
+                ticks += 1
                 if not self.nc or not self.nc.is_connected:
+                    if ticks % 30 == 1:
+                        self.log_connection("heartbeat_skipped", reason="nats_not_connected")
                     continue
                 if not self.registered:
                     await self.register()
@@ -428,7 +433,20 @@ class InterfaceProcess:
                     "hub.heartbeat", canonical_json(request), timeout=2
                 )
                 value = json.loads(reply.data.decode("utf-8"))
-                if value.get("must_register"):
+                # 中枢重启/会话丢失时，注册状态在席位这边是过期的：
+                # 只认 must_register 不够（旧中枢回的是 unauthorized），
+                # 任何"不 ok"的回复都当成"重新注册一次"的信号。
+                sent += 1
+                if sent == 1 or sent % 30 == 0 or not value.get("ok"):
+                    self.log_connection("heartbeat_reply", seq=sent,
+                                         ok=bool(value.get("ok")),
+                                         reason=value.get("reason"))
+                if value.get("must_register") or not value.get("ok"):
+                    self.registered = False
+                    self.log_connection(
+                        "re_register_requested",
+                        reason=value.get("reason"),
+                    )
                     await self.register()
             except asyncio.CancelledError:
                 return
@@ -1109,8 +1127,73 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+EXIT_SEAT_ALREADY_RUNNING = 3
+
+
+def _acquire_seat_singleton(base: Path, interface_id: str):
+    """同一席位 id 只允许一个进程。
+
+    中枢侧已有单例锁（UAI-13），席位侧原来没有：手动再起一个 interface.py 就能和
+    常驻那个并存，而中枢只按 interface_id 认会话——它看不出身后站了两个写者。
+    """
+    import sys as _sys
+
+    stage2 = Path(__file__).resolve().parent.parent / "stage2"
+    if str(stage2) not in _sys.path:
+        _sys.path.insert(0, str(stage2))
+    try:
+        from hub_singleton import HubSingleton
+    except Exception as exc:
+        return None, {"reason": "singleton_unavailable:%s" % str(exc)[:100]}
+
+    guard = HubSingleton(
+        Path(base) / "data" / ("seat-%s.lock" % interface_id),
+        namespace="uai-seat:%s" % interface_id,
+        ttl_s=float(os.environ.get("UAI_SEAT_SINGLETON_TTL", "600")),
+    )
+    ok, info = guard.acquire()
+    return (guard, info) if ok else (None, info)
+
+
+def _renew_seat_lock_forever(guard) -> None:
+    """守护线程续期。TTL 只用于告警；真裁决在 OS 独占锁上。"""
+    import threading
+    import time as _time
+
+    def _loop() -> None:
+        while True:
+            _time.sleep(max(5.0, float(guard.ttl_s) / 3.0))
+            try:
+                guard.heartbeat()
+            except Exception:
+                return
+
+    threading.Thread(target=_loop, name="seat-lock-heartbeat", daemon=True).start()
+
+
 def main() -> int:
     args = parse_args()
+    base = args.base.resolve()
+    guard, info = _acquire_seat_singleton(base, args.interface_id)
+    if guard is None:
+        # 第二个同 id 席位**不许**静默共存：中枢会把一个 id 当成两个写者。
+        print(
+            json.dumps(
+                {
+                    "event": "seat_singleton_denied",
+                    "interface_id": args.interface_id,
+                    "reason": info.get("reason"),
+                    "holder": info.get("holder"),
+                    "pid": os.getpid(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return EXIT_SEAT_ALREADY_RUNNING
+    _renew_seat_lock_forever(guard)
+    import atexit
+    atexit.register(guard.release)
     process = InterfaceProcess(
         base=args.base.resolve(),
         interface_id=args.interface_id,
