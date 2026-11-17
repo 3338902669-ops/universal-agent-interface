@@ -65,9 +65,19 @@ def count(**kwargs) -> int:
 
 
 def alive(pid: int) -> bool:
-    """存活判定走 psutil（跨平台一致，且不会像 os.kill(pid,0) 那样在 Windows 上杀进程）。"""
+    """存活判定走 psutil（跨平台一致，且不会像 os.kill(pid,0) 那样在 Windows 上杀进程）。
+
+    僵尸进程算「不在」：Linux 上父进程还没 wait（例如我们刚 terminate 完）时 PID 仍存在，
+    psutil.is_running() 会返回 True。对"服务还在不在"这个问题，僵尸就是不在——
+    否则监督逻辑会把一个已经死掉、只剩空壳的 PID 当成健康。
+    """
     try:
-        return psutil.Process(int(pid)).is_running()
+        proc = psutil.Process(int(pid))
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return False
+        return proc.is_running()
+    except psutil.ZombieProcess:
+        return False
     except (psutil.NoSuchProcess, ValueError, TypeError):
         return False
     except psutil.AccessDenied:

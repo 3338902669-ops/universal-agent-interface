@@ -55,7 +55,17 @@ jobs:
 
       - name: Core package self-tests (uai-core)
         working-directory: packages/uai-core
-        run: python -m pytest tests -q
+        run: python -m pytest tests -q 2>&1 | tee uai-core-pytest.log
+
+      # 日志端点要仓库管理员权限，普通账号看不到 —— 所以把失败输出当工件传上来，
+      # 下一次红的时候不用再猜。
+      - name: Upload uai-core test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uai-core-pytest-log
+          path: packages/uai-core/uai-core-pytest.log
+          if-no-files-found: warn
 
       - name: Cross-repo vocabulary consistency
         working-directory: stage2

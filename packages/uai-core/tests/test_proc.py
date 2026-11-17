@@ -39,12 +39,24 @@ def test_alive_and_kill() -> None:
     time.sleep(0.4)
     assert proc.alive(child.pid) is True
     assert proc.kill(child.pid) is True
+    try:
+        child.wait(timeout=10)   # 收尸：否则 Linux 上 PID 变僵尸，alive() 会看到壳
+    except Exception:
+        pass
     time.sleep(0.3)
     assert proc.alive(child.pid) is False
     assert proc.alive(999999) is False
 
 
-def test_find_self_by_executable_path() -> None:
-    """按解释器路径找自己：跨平台稳定（进程名在 Linux 上是 python3/python3.13）。"""
-    rows = proc.find(contains=(sys.executable,), exclude_pids=(0,))
+def test_find_includes_own_process() -> None:
+    """枚举必须包含自己（不靠命令行里恰好出现某个路径——venv 里 sys.executable
+    常是软链，cmdline 里是另一个等价路径，按它匹配在 Linux 上会落空）。"""
+    rows = proc.find()
     assert any(r["pid"] == os.getpid() for r in rows)
+
+
+def test_name_prefix_keeps_python_only() -> None:
+    """监督/席位识别用的是 name_prefix=('python',)：必须真的只留下 python 类进程。"""
+    rows = proc.find(name_prefix=("python",))
+    assert any(r["pid"] == os.getpid() for r in rows)
+    assert all(r["name"].lower().startswith("python") for r in rows)
