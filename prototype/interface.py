@@ -234,6 +234,7 @@ class InterfaceProcess:
         suppress_echo: bool,
         executor: str,
         runtime_executable: str,
+        work_root: Path | None = None,
     ):
         self.base = base
         self.interface_id = interface_id
