@@ -63,3 +63,20 @@
 
 无 JS、无图片、单 CSS（7.5KB），运动预算低档：tween 0 / ScrollTrigger 0 / pin 0 / canvas 0。
 面板本体只在 DSH 侧栏内渲染一次，无首屏图片、无 LCP 竞争。
+
+## 6. DSH 内实测（面板上线后）
+
+| 项 | 结果 | 证据等级 |
+|---|---|---|
+| 侧栏出现「UAI 协作」 | **通过** | E3（用户目视确认） |
+| 点击入口能切进面板 | **通过**（修复 `main` keyed slot 的 `key`/`id` 混用后） | E3 |
+| 面板渲染真实数据（中枢/席位/监督 + 席位表 + 能力矩阵） | **通过** | E1：`/uai/status` 同源返回 hub held=true、4 席 held=true、supervisor=1 |
+| 思考链卡片（uai_status / uai_detect） | 未验：需要一次真实工具调用触发 | E4 |
+| DSH 内 console 0 error | 未验（无 DevTools 通道） | E4 |
+
+### 上线过程留下的两个教训（都已在自检里加了硬门）
+
+| 症状 | 根因 | 现在怎么防 |
+|---|---|---|
+| 重启后左栏没有入口 | 客户端模块没导出 `inject = ['slots']`，fiber 在 slots 服务就绪前激活，`ctx.slots` 为 undefined | selftest 断言 `exports.inject` 含 `slots` |
+| 入口在、点击没反应 | `main` 是 **keyed** slot，条目用 `key` 索引；写成 `id` 后侧栏能选中但渲染不到内容 | selftest 断言 `main` 必须带 `key` 且不得带 `id` |
