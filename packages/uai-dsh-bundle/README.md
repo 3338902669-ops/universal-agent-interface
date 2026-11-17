@@ -16,6 +16,7 @@ DSH 里的 UAI 协作面板：左侧栏一个「UAI 协作」页，显示中枢/
 | scripts/install.ps1 | 一键安装（pnpm link + 写 bundles + 环境变量提示），幂等，改前备份 |
 | scripts/uninstall.ps1 | 一键卸载（移出 bundles + pnpm remove） |
 | scripts/patch-profile.mjs | 幂等维护 profile 的 dsh.profile.bundles（add/remove/check） |
+| scripts/compose-check.mjs | **静态**验证「DSH 会不会加载它」：按合成顺序把 patch 应用一遍，检查 uai-collab 行是否进树 |
 
 宿主注册两个工具：**uai_status**（常驻面：中枢/席位/监督）与 **uai_detect**（能力矩阵：就绪 N/M）。模型可以直接问，
 客户端为它注册 `tool.call.toolview` 卡片 —— 这样一次调用在思考链里是一张卡（中枢/席位/监督 + 状态色），
@@ -96,6 +97,10 @@ profile/cordis.yml []                      <- 空入口表
 ### 重启后 30 秒验收清单
 
 ```powershell
+# 0) 先静态确认加载路径（不需要重启）
+node scripts/compose-check.mjs
+# 期望 RESULT: 13/13 passed
+
 # 1) 桥起来了（宿主插件已加载）
 Invoke-WebRequest http://127.0.0.1:47311/uai/ping -UseBasicParsing | Select-Object -Expand Content
 # 期望 {"ok":true,"service":"uai-collab",...}
