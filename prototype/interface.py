@@ -663,12 +663,42 @@ class InterfaceProcess:
                 if response.get("ok"):
                     self.state.ack_event(row["event_id"], True, response)
                 else:
+                    reason = str(response.get("reason"))
+                    # hub 对 seq 与任务终态是权威。下面这些拒绝是**不会再变好**的：
+                    # seq_gap = 本席重启后事件序号与 hub 记录脱节；task_not_found/终态 = 任务已不归本席。
+                    # 若继续当 pending 重试，claim() 会因「backlog 未清空」永远 return None
+                    # → 席位活着、锁在握、心跳正常，却永不认领任务（2026-11-18 实测：
+                    #   一次 306s 超时把 codex 席位永久毒化）。
+                    if reason in (
+                        "seq_gap",
+                        "task_not_found",
+                        "unknown_task",
+                        "task_terminal",
+                        "fencing_rejected",
+                    ):
+                        self.state.ack_event(
+                            row["event_id"],
+                            True,
+                            {
+                                "dropped": True,
+                                "reason": reason,
+                                "expected_seq": response.get("expected_seq"),
+                            },
+                        )
+                        self.log_connection(
+                            "event_dropped",
+                            task_id=row["task_id"],
+                            seq=row["seq"],
+                            reason=reason,
+                            expected_seq=response.get("expected_seq"),
+                        )
+                        continue
                     self.state.ack_event(row["event_id"], False, response)
                     self.log_connection(
                         "event_rejected",
                         task_id=row["task_id"],
                         seq=row["seq"],
-                        reason=response.get("reason"),
+                        reason=reason,
                     )
             except asyncio.TimeoutError:
                 self.state.ack_event(
@@ -711,10 +741,11 @@ class InterfaceProcess:
             },
         )
         try:
-            # The event backlog must finish before any new task claim.
-            if self.state.pending_events():
+            # backlog 只阻塞**同一任务**的认领：别的任务的积压不该让本席罢工。
+            backlog = self.state.pending_events()
+            if backlog:
                 await self.force_flush_outbox()
-                if self.state.pending_events():
+                if any(row["task_id"] == task_id for row in self.state.pending_events()):
                     return None
             reply = await self.nc.request(
                 "hub.claim", canonical_json(request), timeout=3
