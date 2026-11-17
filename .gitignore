@@ -52,3 +52,5 @@ prototype_clean/
 
 # tianshu (rivet) 在 adapter 工作目录里生成的 hooks
 stage2/.rivet/
+# 席位任务工作目录（运行时产物，含 rivet 项目信任库，不入库）
+.uai-work/
