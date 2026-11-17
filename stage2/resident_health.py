@@ -30,9 +30,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-import hub_singleton as HS          # noqa: E402
+import hub_singleton as HS          # noqa: E402  (uai_core 的薄壳)
+from uai_core import paths           # noqa: E402
+from uai_core.oslayer import proc as UPROC  # noqa: E402  跨平台进程枚举（psutil）
 
-HUB_BASE = Path(r"C:\Users\33389\.shared\comms-v2\cutover-base-20261109")
+# 数据面：优先 UAI_BASE，其次 uai_core 默认（~/.uai/base）。
+# 旧部署把 UAI_BASE 指到 comms-v2 那一份即可，路径不再写死在代码里。
+HUB_BASE = Path(os.environ.get("UAI_BASE") or paths.base_dir())
 NATS_URL = "nats://127.0.0.1:4223"
 AUTOSTART_VBS = r"C:\Users\33389\.shared\uai-hub\start-uai-hub.vbs"
 NATS_CONF = r"C:\Users\33389\.shared\uai-hub\nats-hub.conf"
@@ -168,24 +172,20 @@ def check_heartbeats_fresh() -> dict:
 
 
 def check_supervisor() -> dict:
-    """监督进程在不在：没有它，子进程死了没人拉。"""
-    # 只数「-File ...run-uai-hub.ps1」的监督进程：检查脚本自己那条
-    # 「-Command ... run-uai-hub.ps1 ...」不算，否则每次都把自己数进去。
-    # 只数「-File ...run-uai-hub.ps1」的监督进程，并且**排除 -Command**：
-    # 检查脚本自己的 powershell 子进程就是 -Command，而且它的命令行里带着匹配模式
-    # 本身，不排除就会把自己数进去（第一版就是这么误报 count=2 的）。
-    ps = ("$p = Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
-          "Where-Object { $_.CommandLine -like '*-File*run-uai-hub.ps1*' "
-          "-and $_.CommandLine -notlike '*-Command*' }; "
-          "@($p).Count")
-    try:
-        res = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps],
-                             capture_output=True, text=True, timeout=30)
-        n = int((res.stdout or "0").strip() or 0)
-        return check("supervisor_present", n == 1, "count=%d" % n)
-    except Exception as exc:
-        return check("supervisor_present", False, str(exc)[:120])
+    """监督进程在不在：没有它，子进程死了没人拉。
 
+    两种形态都认：Python 监督（uai_core serve）与旧 PowerShell 监督（run-uai-hub.ps1）。
+    用 psutil 直接读进程表，不 spawn 子壳——旧实现用 `-Command` 查进程时，
+    检查脚本自己的命令行里带着匹配模式，于是把自己也数进去（曾误报 count=2）。
+    """
+    forms = (("uai_core", "serve"), ("run-uai-hub.ps1", "-File"))
+    found = []
+    for tokens in forms:
+        found.extend(r["pid"] for r in UPROC.find(contains=tokens,
+                                                 exclude_pids=(os.getpid(),)))
+    pids = sorted(set(found))
+    return check("supervisor_present", len(pids) == 1,
+                 "count=%d pids=%s" % (len(pids), pids))
 
 def seat_ids() -> list[str]:
     tok = HUB_BASE / ".lab-tokens"

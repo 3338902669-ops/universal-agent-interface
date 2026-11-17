@@ -177,3 +177,40 @@ grep 实测（不含文档）的 Windows 强耦合点：
 ## 15 命名（已定）
 
 作用域 `@uai/`：`@uai/core`、`@uai/mcp`、`@uai/dsh-bundle`；技能名 `uai-collab`。第一版先在本地以 `file:` 安装验证，再发布。
+
+## 16 P0 落地记录（2026-11-17，含 Linux 实测）
+
+### 16.1 产出了什么
+
+`packages/uai-core/`（Python，`pip install -e` 即可）：
+
+| 模块 | 作用 |
+|---|---|
+| `uai_core.paths` | `UAI_HOME`（默认 `~/.uai`）/ `UAI_BASE`；**无任何硬编码用户目录** |
+| `uai_core.oslayer.lock` | 跨平台独占锁（`msvcrt.locking` / `flock`）+ 心跳 + 接管留痕；与旧 `hub_singleton` 语义逐条对齐 |
+| `uai_core.oslayer.proc` | psutil 进程发现/存活/终止，**替掉 `Get-CimInstance` + PowerShell**（也消除了「把检查脚本自己数进去」那类 bug） |
+| `uai_core.oslayer.service` | 开机自启：systemd --user / launchd / Windows 启动文件夹（用户级，不需要管理员） |
+| `uai_core.detect` | 三层检测，12 个 agent 的探测表；状态区分 `ready / auth_failed / version_incompatible / absent / error / running` |
+| `uai_core.config` | `seats.yml`（跨平台命令数组，不放 PowerShell/绝对路径） |
+| `uai_core.cli` | `doctor / detect / seats --from-detect / status / serve / install-service / uninstall-service` |
+
+接线：`stage2/hub_singleton.py` 变成薄壳（re-export `uai_core.oslayer.lock`），
+`stage2/resident_health.py` 与 `stage2/drill_resident_plane.py` 的进程枚举换成 psutil，
+`HUB_BASE` 改由 `UAI_BASE` 决定。**旧入口名一个没改**，`prototype/hub.py` 无需改动。
+
+### 16.2 验证（E1）
+
+| 项 | 结果 |
+|---|---|
+| `uai-core` 自带测试 | **25/25**（锁 9 项含 8 进程并发、进程 4 项、检测 7 项、配置 4 项） |
+| 旧入口 A-09 套件（跑在新实现上） | **28/28**，含「8 进程恰好 1 个写者」「第二个中枢启动即退出码 3」 |
+| 本机 `uai detect` | `ready 5 / absent 7`：dsh、codex、claude、openclaw、rivet 就绪；workbuddy/opencode/trae/cursor/gemini/aider/ollama 未安装 |
+| **Linux（InstaBox 沙箱）** | `python 3.13.5`；**pytest 25/25**；`uai doctor` 正常（`/data/home/.uai`、platform posix/linux、自启落到 XDG autostart）；`uai detect` → **codex / claude ready**，其余 absent |
+| 实机健康检查（换 psutil 版） | 14 项全绿、exit 0，`supervisor_present count=1` |
+
+### 16.3 这轮顺带发现的事故
+
+大约 12:56（UTC 04:56）整套常驻面**全部消失且没有自愈**：hub 进程不在、supervisor 不在、
+NATS 4223 不监听、账本与心跳停在 12:55。健康检查如实报红（正是它该做的事）。
+手动执行自启入口后恢复，14 项全绿。
+**结论**：自启只在登录时跑一次，监督进程被杀后没有任何东西会把它拉回来——这正是 `uai serve` + `install-service` 要补的位，也说明 F-06 的冷启动验证依然必要。

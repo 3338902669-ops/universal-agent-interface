@@ -37,38 +37,44 @@ def check(name, cond, detail=""):
     print("%s  %-52s %s" % ("PASS" if cond else "FAIL", name, detail))
 
 
-def ps_json(script: str):
-    res = subprocess.run(["powershell.exe", "-NoProfile", "-Command", script],
-                         capture_output=True, text=True, timeout=120)
-    out = (res.stdout or "").strip()
-    if not out:
-        return []
-    try:
-        data = json.loads(out)
-    except Exception:
-        return []
-    return data if isinstance(data, list) else [data]
+def _pids(kind: str) -> list[int]:
+    """用 psutil 枚举（跨平台、不 spawn 子壳、不会把自己数进去）。"""
+    from uai_core.oslayer import proc as UPROC
+
+    if kind == "supervisor":
+        forms = (("uai_core", "serve"), ("run-uai-hub.ps1", "-File"))
+        pids = []
+        for tokens in forms:
+            pids.extend(r["pid"] for r in UPROC.find(contains=tokens,
+                                                    exclude_pids=(os.getpid(),)))
+        return sorted(set(pids))
+    if kind == "hub":
+        return [r["pid"] for r in UPROC.find(contains=("hub.py",),
+                                             exclude_pids=(os.getpid(),))]
+    return [r["pid"] for r in UPROC.find(contains=("interface.py",),
+                                         exclude_pids=(os.getpid(),))]
 
 
 def procs(kind: str) -> list[dict]:
-    if kind == "supervisor":
-        script = ("Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
-                  "Where-Object { $_.CommandLine -like '*-File*run-uai-hub.ps1*' "
-                  "-and $_.CommandLine -notlike '*-Command*' } | "
-                  "Select-Object ProcessId | ConvertTo-Json -Depth 3")
-    elif kind == "hub":
-        script = ("Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-                  "Where-Object { $_.CommandLine -like '*prototype*hub.py*' } | "
-                  "Select-Object ProcessId | ConvertTo-Json -Depth 3")
-    else:
-        script = ("Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-                  "Where-Object { $_.CommandLine -like '*interface.py*' } | "
-                  "Select-Object ProcessId, @{n='seat';e={ "
-                  r"if ($_.CommandLine -match '--interface-id\s+(\S+)') { $matches[1] } }} | "
-                  "ConvertTo-Json -Depth 3")
-    rows = ps_json(script)
-    return [r for r in rows if isinstance(r, dict) and r.get("ProcessId")]
+    if kind == "seat":
+        rows = UPROC_WITH_SEAT()
+        return rows
+    return [{"ProcessId": pid} for pid in _pids(kind)]
 
+
+def UPROC_WITH_SEAT() -> list[dict]:
+    from uai_core.oslayer import proc as UPROC
+
+    out = []
+    for row in UPROC.find(contains=("interface.py",), exclude_pids=(os.getpid(),)):
+        seat = None
+        parts = row["cmdline"]
+        for i, token in enumerate(parts):
+            if token == "--interface-id" and i + 1 < len(parts):
+                seat = parts[i + 1]
+                break
+        out.append({"ProcessId": row["pid"], "seat": seat})
+    return out
 
 def wait_for(fn, timeout_s: float, interval_s: float = 2.0):
     deadline = time.time() + timeout_s
@@ -82,11 +88,19 @@ def wait_for(fn, timeout_s: float, interval_s: float = 2.0):
 
 
 def kill(pids):
-    for pid in pids:
-        subprocess.run(["powershell.exe", "-NoProfile", "-Command",
-                        "Stop-Process -Id %d -Force -ErrorAction SilentlyContinue" % pid],
-                       capture_output=True, text=True, timeout=60)
+    from uai_core.oslayer import proc as UPROC
 
+    for pid in pids:
+        UPROC.kill(int(pid), timeout=8.0)
+
+
+def fire_autostart():
+    """旧部署用 vbs；新部署用 uai install-service + uai serve。两者都试。"""
+    vbs = r"C:\Users\33389\.shared\uai-hub\start-uai-hub.vbs"
+    try:
+        subprocess.run(["wscript.exe", vbs], timeout=60)
+    except Exception:
+        pass
 
 def fire_autostart():
     subprocess.run(["wscript.exe", VBS], timeout=60)
