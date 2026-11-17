@@ -130,6 +130,104 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+
+
+def cmd_guard(args: argparse.Namespace) -> int:
+    """二级看护：监督者自己死了怎么办。
+
+    为什么需要它：`uai serve` 由启动文件夹在登录时拉起，但如果它中途被杀
+    （实测：DSH 桌面版重启会把整棵 wscript→pythonw 进程树一起带走），没有任何东西
+    会把它拉回来。guard 被计划任务每 2 分钟叫一次，只做一件事：
+    监督锁没人持有 → 拉起；有人持有 → 什么都不做。
+    """
+    from .oslayer.lock import FileLock
+
+    probe = FileLock(paths.run_dir() / "supervisor.lock", namespace="uai-supervisor", ttl_s=600)
+    st = probe.status()
+    pid = (st.get("holder") or {}).get("pid")
+    if st.get("held") and pid and proc.alive(int(pid)):
+        _print({"ok": True, "event": "guard_noop", "holder_pid": int(pid)})
+        return 0
+
+    cfg = config.load(args.config)
+    pythonw = _pythonw_path()
+    cmd = [pythonw, "-m", "uai_core", "serve"]
+    env = dict(os.environ)
+    env.setdefault("UAI_HOME", str(paths.uai_home()))
+    flags = 0
+    if service.platform_kind() == "windows":
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    log_path = paths.logs_dir() / "guard.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(log_path, "a", encoding="utf-8")
+    handle.write("\n=== guard spawn %s at %s ===\n" % (" ".join(cmd), time.strftime("%Y-%m-%dT%H:%M:%S")))
+    handle.flush()
+    child = subprocess.Popen(cmd, stdout=handle, stderr=subprocess.STDOUT,
+                             cwd=str(paths.uai_home()), env=env, creationflags=flags)
+    time.sleep(float(cfg.get("guard", {}).get("verify_wait_s", 6.0)))
+    st2 = probe.status()
+    pid2 = (st2.get("holder") or {}).get("pid")
+    ok = bool(st2.get("held") and pid2 and proc.alive(int(pid2)))
+    _print({"ok": ok, "event": "guard_started" if ok else "guard_failed",
+            "spawned_pid": child.pid, "holder_pid": pid2,
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    return 0 if ok else 1
+
+
+
+
+GUARD_TASK = "UAI Guard"
+
+
+def _guard_command() -> str:
+    """计划任务要跑的命令行：pythonw -m uai_core guard。"""
+    root = Path(__file__).resolve().parents[1]
+    parts = [f'"{sys.executable}" -m uai_core guard']
+    home = os.environ.get("UAI_HOME") or str(paths.uai_home())
+    parts.append(f'--config "{home}/seats.yml"')
+    return " ".join(parts).replace("python.exe", "pythonw.exe")
+
+
+def cmd_install_guard(args: argparse.Namespace) -> int:
+    """注册二级看护：每 N 分钟检查一次监督者。"""
+    if service.platform_kind() != "windows":
+        _print({"ok": False, "reason": "unsupported_platform",
+                "hint": "Linux/macOS 请用 systemd timer 或 launchd StartInterval 调 `uai guard`"})
+        return 2
+    cmdline = _guard_command()
+    minutes = max(1, int(args.interval_minutes))
+    res = subprocess.run([
+        "schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", str(minutes),
+        "/TN", GUARD_TASK, "/TR", cmdline,
+    ], capture_output=True, text=True)
+    ok = res.returncode == 0
+    _print({"ok": ok, "event": "guard_installed" if ok else "guard_install_failed",
+            "task": GUARD_TASK, "interval_minutes": minutes, "command": cmdline,
+            "detail": (res.stdout or res.stderr or "").strip()[:300]})
+    return 0 if ok else 1
+
+
+def cmd_uninstall_guard(args: argparse.Namespace) -> int:
+    """移除二级看护。"""
+    if service.platform_kind() != "windows":
+        _print({"ok": False, "reason": "unsupported_platform"})
+        return 2
+    res = subprocess.run(["schtasks", "/Delete", "/F", "/TN", GUARD_TASK],
+                         capture_output=True, text=True)
+    ok = res.returncode == 0
+    _print({"ok": ok, "event": "guard_removed" if ok else "guard_remove_failed",
+            "detail": (res.stdout or res.stderr or "").strip()[:300]})
+    return 0 if ok else 1
+
+def _pythonw_path() -> str:
+    """优先 pythonw.exe：guard/serve 是常驻进程，不该带控制台窗口。"""
+    exe = Path(sys.executable)
+    if service.platform_kind() == "windows":
+        cand = exe.with_name("pythonw.exe")
+        if cand.exists():
+            return str(cand)
+    return str(exe)
+
 def _spawn(cmd: list[str], log_path: Path) -> subprocess.Popen:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
@@ -338,6 +436,10 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--dry-run", action="store_true")
     sub.add_parser("install-service")
     sub.add_parser("uninstall-service")
+    sub.add_parser("guard")
+    g = sub.add_parser("install-guard")
+    g.add_argument("--interval-minutes", type=int, default=2)
+    sub.add_parser("uninstall-guard")
     return ap
 
 
@@ -367,6 +469,9 @@ def main(argv: list[str] | None = None) -> int:
         "serve": cmd_serve,
         "install-service": cmd_install_service,
         "uninstall-service": cmd_uninstall_service,
+        "guard": cmd_guard,
+        "install-guard": cmd_install_guard,
+        "uninstall-guard": cmd_uninstall_guard,
     }
     return table[args.cmd](args)
 
