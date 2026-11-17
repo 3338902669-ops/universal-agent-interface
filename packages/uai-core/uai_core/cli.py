@@ -180,12 +180,13 @@ GUARD_TASK = "UAI Guard"
 
 
 def _guard_command() -> str:
-    """计划任务要跑的命令行：pythonw -m uai_core guard。"""
-    root = Path(__file__).resolve().parents[1]
-    parts = [f'"{sys.executable}" -m uai_core guard']
-    home = os.environ.get("UAI_HOME") or str(paths.uai_home())
-    parts.append(f'--config "{home}/seats.yml"')
-    return " ".join(parts).replace("python.exe", "pythonw.exe")
+    """计划任务要跑的命令行：pythonw -m uai_core guard。
+
+    注意：**不要**往这里塞 --config —— 它是顶层参数，写在子命令后面会被 argparse 判成
+    unrecognized argument 直接 exit 2，计划任务就变成「跑了个寂寞」（日志里什么都没有）。
+    配置走默认解析（$UAI_HOME/seats.yml），需要改就用环境变量 UAI_HOME。
+    """
+    return f'"{_pythonw_path()}" -m uai_core guard'
 
 
 def cmd_install_guard(args: argparse.Namespace) -> int:
