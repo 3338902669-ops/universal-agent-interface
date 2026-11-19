@@ -89,7 +89,8 @@ def task_spec(task_id, instruction, result_path):
     head = "comms-v2 v0.2 legacy task, task " + task_id + ": " + instruction
     tail = ("When done, write the result as plain text into " + str(result_path)
             + ". Writing the file completes the task; do not send a mail reply.")
-    return head + chr(10) + tail + chr(10)
+    # GUI wake bridge forwards one prompt string; line breaks truncate/fragment vendor prompts.
+    return head + " | " + tail
 
 
 def write_spec(msg_file, text):

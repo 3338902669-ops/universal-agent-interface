@@ -252,15 +252,27 @@ def validate_envelope(raw: bytes | str | dict[str, Any]) -> tuple[bool, str | No
         return False, "target_must_name_exactly_one", None
     if not isinstance(value["instruction"], str):
         return False, "invalid_instruction", None
+    # v0.2 keeps params opaque, but a supplied task_contract is execution-critical:
+    # validate it before the hub accepts the task so bad dispatches never reach a seat.
+    try:
+        from dispatch_contract import validate_task_contract
+
+        contract_reason = validate_task_contract(value)
+    except Exception:
+        return False, "invalid_task_contract:validator_error", None
+    if contract_reason:
+        return False, contract_reason, None
     if value["cls"] not in VALID_CLASSES:
         return False, "invalid_cls", None
     if not isinstance(value["timeout_s"], (int, float)) or value["timeout_s"] <= 0:
         return False, "invalid_timeout_s", None
-    if value["resource_key"] is not None and not isinstance(value["resource_key"], str):
+    resource_key = value.get("resource_key")
+    if resource_key is not None and not isinstance(resource_key, str):
         return False, "invalid_resource_key", None
-    if not isinstance(value["attachments"], list):
+    attachments = value.get("attachments")
+    if attachments is not None and not isinstance(attachments, list):
         return False, "invalid_attachments", None
-    for attachment in (value.get("attachments") or []):
+    for attachment in (attachments or []):
         if not isinstance(attachment, dict):
             return False, "invalid_attachment", None
         uri = attachment.get("uri")

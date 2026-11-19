@@ -27,5 +27,19 @@ processes:
               --runtime-executable, ${REPO}/stage2/runtime_adapters/dsh_adapter.py]
     lock: seat:dsh
 
+# task_contract（派单层可选，但所有跨席审查/实测验建议强制带）：
+# - instruction 必须单行；避免各厂商 CLI 只取首行造成“没有任务”。
+# - allowed_paths 必须是存在的绝对路径；席位工作目录是 .uai-work/<task_id>，不是仓库根。
+# - time_limit_s 不得大于 envelope.timeout_s；禁止项与回执格式直接编译给每个 adapter。
+# - 由 hub 在派单前拒绝格式错误，席位无需猜测。
+# 示例（放在 envelope.params.task_contract，不是此 yml 的 process 块）：
+# task_contract:
+#   version: 1
+#   scope: 只审指定函数，不改文件
+#   allowed_paths: [C:/repo/prototype/interface.py]
+#   forbidden_actions: [不得修改文件, 不得读取技能库, 不得全仓扫描]
+#   response_format: 第一行 PASS 或 FAIL；随后最多三条风险，每条附文件:行号
+#   time_limit_s: 180
+
 # seats: 由 `uai seats --from-detect` 生成（10+ 厂商的能力矩阵与启用状态）
 seats: []

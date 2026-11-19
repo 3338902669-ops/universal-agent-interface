@@ -45,18 +45,15 @@ def main():
     _, i2 = xa.parse(["exec", "-C", ".", "写一个", "hello world", "程序"])
     check("XYA-3 multiword intact", i2 == "写一个 hello world 程序", i2)
 
-    # ---- 2. 任务单格式（运营给定，逐字核对）----
+    # ---- 2. 任务单传输格式：所有厂商都必须只有一个 prompt 行 ----
     spec = xa.task_spec("abc123", "只回复 OK", Path("C:/x/comms-tasks/abc123.txt"))
-    lines = spec.rstrip().splitlines()
-    check("XYA-4 spec has 2 lines", len(lines) == 2, str(len(lines)))
+    check("XYA-4 spec is single line", "\n" not in spec and "\r" not in spec, repr(spec[:100]))
     check("XYA-5 spec head format",
-          lines[0] == "comms-v2 v0.2 legacy task, task abc123: 只回复 OK", lines[0][:70])
-    check("XYA-6 spec tail instruction",
-          lines[1].startswith("When done, write the result as plain text into "), lines[1][:70])
-    check("XYA-7 spec tail names result file",
-          "abc123.txt" in lines[1], "")
-    check("XYA-8 spec tail no-mail clause",
-          "do not send a mail reply" in lines[1], "")
+          spec.startswith("comms-v2 v0.2 legacy task, task abc123: 只回复 OK"), spec[:70])
+    check("XYA-6 spec names result file",
+          "abc123.txt" in spec, "")
+    check("XYA-7 spec no-mail clause",
+          "do not send a mail reply" in spec, "")
 
     # ---- 3. 缺指令 ----
     r0 = subprocess.run([sys.executable, str(ADAPTER), "exec", "--json", "-C", "."],

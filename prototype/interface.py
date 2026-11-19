@@ -22,6 +22,7 @@ import nats
 from nats.aio.client import Client as NATS
 from nats.aio.msg import Msg
 
+from dispatch_contract import build_runtime_instruction
 from core import (
     CONTRACT_VERSION,
     AppendOnlyJsonl,
@@ -1123,7 +1124,7 @@ class InterfaceProcess:
             "--json",
             "-C",
             str(workdir),
-            envelope["instruction"] + " " + self._preamble(envelope),
+            build_runtime_instruction(envelope, self._preamble(envelope)),
         ]
         self.operation(
             task_id,
@@ -1132,6 +1133,9 @@ class InterfaceProcess:
             "started",
         )
         timeout_s = float(envelope["timeout_s"])
+        task_contract = (envelope.get("params") or {}).get("task_contract") or {}
+        if task_contract:
+            timeout_s = min(timeout_s, float(task_contract["time_limit_s"]))
         completed = await asyncio.to_thread(
             subprocess.run,
             command,
