@@ -139,24 +139,37 @@ def test_hub_wiring():
           (resp.get("graph_memory") or {}).get("reason") == "disabled_by_env",
           json.dumps(resp.get("graph_memory")))
 
-    # 开启 + 假 bridge：证明 hub 真把裁定交给了写入点
+    # 开启 + 假管道：证明 hub 真把裁定交给了记忆管道（outbox 优先，不再直写图谱）
     os.environ["UAI_GRAPH_OUTCOMES"] = "1"
-    fake = FakeBridge(result={"ok": True, "created": True, "seen": 1})
-    OR._BRIDGE = fake
+    import memory_pipeline
+
+    calls = []
+    original = memory_pipeline.record_verdict
+
+    def fake_record_verdict(**kwargs):
+        calls.append(kwargs)
+        return {"enqueued": True, "written": True, "status": "delivered",
+                "intent_id": "int-hub-1", "path": "graphiti", "degraded": False,
+                "verified": "verified", "key": "%s|%s" % (kwargs["task_id"], kwargs["verdict"])}
+
+    memory_pipeline.record_verdict = fake_record_verdict
     try:
         hub2 = make_hub()
         msg2 = FakeMsg({"task_id": "t-hub-1", "verdict": "通过", "checker": "tester"})
         asyncio.run(hub2.on_verdict(msg2))
         resp2 = msg2.responses[-1] if msg2.responses else {}
         gm = resp2.get("graph_memory") or {}
-        check("UAI-08 hub 把裁定写进图谱（走过真实 on_verdict）",
+        check("UAI-08 hub 把裁定交给记忆管道（走过真实 on_verdict）",
               gm.get("written") is True, json.dumps(gm))
-        check("UAI-08 hub 传入的任务文本与执行者正确",
-              bool(fake.calls) and fake.calls[0]["task_desc"] == "uai08 wiring check"
-              and fake.calls[0]["agent_id"] == "codex",
-              json.dumps(fake.calls[0])[:90] if fake.calls else "no call")
+        check("UAI-08 hub 传入的任务与执行者正确",
+              bool(calls) and calls[0].get("task_id") == "t-hub-1"
+              and calls[0].get("agent_id") == "codex",
+              json.dumps(calls[0])[:90] if calls else "no call")
+        check("UAI-08 管道收到任务原文",
+              bool(calls) and calls[0].get("description") == "uai08 wiring check",
+              calls[0].get("description") if calls else "no call")
     finally:
-        OR._BRIDGE = None
+        memory_pipeline.record_verdict = original
 
 
 def test_real_graph():

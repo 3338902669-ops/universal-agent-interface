@@ -50,6 +50,32 @@ def iso_after(seconds: float) -> str:
     ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _load_memory_pipeline():
+    """按需加载 stage2 记忆管道（hub 不硬依赖它，缺了也要能跑）。"""
+    import sys as _sys
+
+    stage2 = Path(__file__).resolve().parent.parent / "stage2"
+    if str(stage2) not in _sys.path:
+        _sys.path.insert(0, str(stage2))
+    import memory_pipeline
+
+    return memory_pipeline
+
+
+def _graph_writes_enabled() -> bool:
+    try:
+        import sys as _sys
+
+        stage2 = Path(__file__).resolve().parent.parent / "stage2"
+        if str(stage2) not in _sys.path:
+            _sys.path.insert(0, str(stage2))
+        from outcome_recorder import graph_writes_enabled
+
+        return graph_writes_enabled()
+    except Exception:
+        return False
+
+
 @dataclass
 class InterfaceSession:
     interface_id: str
@@ -95,6 +121,10 @@ class Hub:
         self.default_lease_seconds = lease_seconds
         # UAI-08：裁定写回图谱的超时（秒）。图谱慢/挂不能拖住裁定。
         self.graph_memory_timeout_s = float(os.environ.get("UAI_GRAPH_MEMORY_TIMEOUT", "3.0"))
+        # outbox 自愈周期：0 = 关闭（测试/离线场景）。落盘不丢，只是晚一点写进图。
+        self.memory_drain_s = float(os.environ.get("UAI_MEMORY_DRAIN_S", "60"))
+        # 持有后台记忆任务的强引用：否则 create_task 的返回值被 GC，任务可能被回收
+        self._memory_tasks: set[asyncio.Task[Any]] = set()
         self.ledger_path = base / "data" / "ledger.jsonl"
         self.ledger = AppendOnlyJsonl(self.ledger_path)
         # 心跳是连接保活，不是审计凭证：单独落盘，不进哈希链主账本
@@ -240,6 +270,8 @@ class Hub:
             server=getattr(self.nc, "connected_url", None),
         )
         self.record("HUB_START", contract_version=CONTRACT_VERSION, pid=os.getpid())
+        if self.memory_drain_s > 0:
+            asyncio.create_task(self._memory_drain_loop())
 
     @staticmethod
     def _decode(msg: Msg) -> dict[str, Any] | None:
@@ -1327,6 +1359,8 @@ class Hub:
                 reason_code=reason_code,
                 envelope=task.envelope,
             )
+        # 失败/超时/取消也要进团队记忆，否则「卡死」永远无法被检索
+        self._spawn_terminal_memory(task, state, reason_code)
         self.schedule_dispatch()
 
     async def on_state(self, msg: Msg) -> None:
@@ -1472,51 +1506,172 @@ class Hub:
         )
 
     async def _record_graph_outcome(self, task: "Task", verdict: str) -> dict[str, Any]:
-        """UAI-08：把裁定写回团队记忆图谱。
+        """UAI 记忆管道：裁定 → outbox → 图谱。
 
-        图谱是**派生数据**：写不进去也不能挡住裁定。三条约束由
-        `stage2/outcome_recorder.py` 保证（幂等键、凭据过滤、fail-open），
-        这里只负责两件事——不让它阻塞中枢，以及**写丢要留痕**。
+        与旧实现的区别：**先持久化入队，再尝试投递**。图谱慢/挂不阻塞裁定，
+        没写成的记忆留在 outbox 里等重试，而不是只剩一条 MEMORY_OUTCOME 就永久丢失。
         """
-        import sys as _sys
-
-        stage2 = Path(__file__).resolve().parent.parent / "stage2"
-        if str(stage2) not in _sys.path:
-            _sys.path.insert(0, str(stage2))
+        if not _graph_writes_enabled():
+            return {"written": False, "reason": "disabled_by_env"}
         try:
-            from outcome_recorder import record_verdict_outcome
+            pipeline = _load_memory_pipeline()
         except Exception as exc:
-            return {"written": False, "reason": "recorder_unavailable:%s" % str(exc)[:100]}
+            return {"written": False, "reason": "pipeline_unavailable:%s" % str(exc)[:100]}
 
         envelope = task.envelope or {}
+        # 只入队不投递：裁定不能被图谱 I/O 拖住（Graphiti 冷启动实测 4.8s）。
         try:
             result = await asyncio.wait_for(
                 asyncio.to_thread(
-                    record_verdict_outcome,
+                    pipeline.record_verdict,
                     task_id=task.task_id,
                     verdict=verdict,
                     agent_id=task.selected_interface or "unknown",
                     description=envelope.get("instruction") or "",
-                    success=verdict in ("通过", "带注通过"),
-                    source="uai.hub.on_verdict",
+                    flush=False,
                 ),
                 timeout=self.graph_memory_timeout_s,
             )
         except asyncio.TimeoutError:
-            result = {"written": False, "reason": "timeout"}
+            result = {"written": False, "reason": "enqueue_timeout"}
         except Exception as exc:
             result = {"written": False, "reason": "error:%s" % str(exc)[:100]}
+        else:
+            self._spawn_memory_drain()
 
-        if not result.get("written"):
-            # 写丢要留痕：账本里查得到，而不是只沉在日志里
+        deferred = (
+            result.get("status") == "pending"
+            or result.get("reason") == "deferred"
+            or bool(result.get("enqueued"))
+            # 同一 task+verdict 重复提交是正常的客户端重试，不是记忆写丢
+            or bool(result.get("duplicate"))
+            or result.get("reason") == "duplicate_intent_id"
+        )
+        if not result.get("written") and not deferred:
+            # 只有「真的没入队」才算记忆写丢；入队成功但还没投递不是失败，
+            # 否则每条正常裁定都会写一条 MEMORY_OUTCOME，把真故障淹掉。
             self.record(
                 "MEMORY_OUTCOME",
                 task_id=task.task_id,
                 verdict=verdict,
                 reason=result.get("reason"),
                 key=result.get("key"),
+                intent_id=result.get("intent_id"),
             )
         return result
+
+    # ---------- 团队记忆：终态事件自动入图 ----------
+
+    def _spawn_memory_drain(self) -> None:
+        """马上补一次投递，不等 60s 周期。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._drain_memory_once())
+        self._memory_tasks.add(task)
+        task.add_done_callback(self._memory_tasks.discard)
+
+    def _spawn_terminal_memory(self, task: "Task", state: str, reason_code: str) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        spawned = loop.create_task(
+            self._record_terminal_memory(task, state, reason_code)
+        )
+        self._memory_tasks.add(spawned)
+
+        def _done(finished: asyncio.Task[Any]) -> None:
+            self._memory_tasks.discard(finished)
+            if finished.cancelled():
+                return
+            exc = finished.exception()
+            if exc is not None:
+                # 后台任务异常不能静默：账本留痕，否则「记忆写丢」永远查不到
+                self.record(
+                    "MEMORY_OUTCOME",
+                    task_id=task.task_id,
+                    state=state,
+                    reason="background_error:%s" % str(exc)[:120],
+                )
+
+        spawned.add_done_callback(_done)
+
+    async def _record_terminal_memory(
+        self, task: "Task", state: str, reason_code: str
+    ) -> None:
+        """失败/超时/取消也要留下可检索的记忆；永远不阻塞中枢。"""
+        if not _graph_writes_enabled():
+            return
+        try:
+            pipeline = _load_memory_pipeline()
+        except Exception:
+            return
+        envelope = task.envelope or {}
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    pipeline.record_terminal,
+                    task_id=task.task_id,
+                    state=state,
+                    agent_id=task.selected_interface or "unknown",
+                    description=envelope.get("instruction") or "",
+                    reason=reason_code,
+                ),
+                timeout=self.graph_memory_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            self.record(
+                "MEMORY_OUTCOME",
+                task_id=task.task_id,
+                state=state,
+                reason="timeout_queued",
+            )
+            return
+        except Exception as exc:
+            self.record(
+                "MEMORY_OUTCOME",
+                task_id=task.task_id,
+                state=state,
+                reason="error:%s" % str(exc)[:120],
+            )
+            return
+        if not result.get("written"):
+            self.record(
+                "MEMORY_OUTCOME",
+                task_id=task.task_id,
+                state=state,
+                reason=result.get("reason"),
+                intent_id=result.get("intent_id"),
+            )
+
+    async def _drain_memory_once(self) -> dict[str, Any]:
+        if not _graph_writes_enabled():
+            return {"skipped": "disabled_by_env"}
+        try:
+            from memory_outbox import MemoryOutbox
+            from memory_writer import drain
+        except Exception as exc:
+            return {"error": "import_failed:%s" % str(exc)[:80]}
+        try:
+            outbox = MemoryOutbox(None)
+            return await asyncio.to_thread(drain, outbox, limit=20)
+        except Exception as exc:
+            return {"error": str(exc)[:120]}
+
+    async def _memory_drain_loop(self) -> None:
+        """outbox 里没写成的记忆靠它自愈，不需要人记得手动 flush。"""
+        while not self.stop_event.is_set():
+            try:
+                await asyncio.sleep(self.memory_drain_s)
+                if self.stop_event.is_set():
+                    return
+                await self._drain_memory_once()
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                continue
 
     async def on_debug(self, msg: Msg) -> None:
         request = self._decode(msg)

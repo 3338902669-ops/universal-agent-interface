@@ -18,7 +18,15 @@
 | `identity.py` | LocalToken / OIDC / mTLS / Static 可插拔；无验证器不得升 `authenticated` | `test_identity.py` **10/10** |
 | `reassign.py` | 改派：围栏+1、attempt+1、必须带原因、终态不可改派 | `test_p1_batch.py` 中 A-11 共 12 条 |
 | `hub_singleton.py` | 中枢单实例：**OS 独占锁**（`msvcrt.locking`/`flock`）裁决 + 持有者校验 + 接管留痕落盘 + 无写权拒绝派发 | `test_a09_singleton.py` **28/28**（含 8 进程真并发 + 真入口拒绝启动） |
-| `outcome_recorder.py` | **裁定 → 团队记忆图谱的生产写入点（UAI-08）**：幂等键 `task_id\|verdict`、凭据样文本整条跳过、fail-open | `test_uai08_graph_write.py` **21/21**（含真图谱写入与去重）；`test_seat_heartbeat_loop.py` **8/8**（席位心跳循环持续运行与重注册——常驻面锁死的回归防线） |
+| 新增模块 | 说明 | 测试 |
+|---|---|---|
+| `memory_intent.py` | 六类结构化记忆契约；E1 强制带证据；凭据正则 + 递归全字段扫描，入队即拒收 | `test_memory_intent.py` 28/28 |
+| `memory_outbox.py` | SQLite durable outbox：BEGIN IMMEDIATE 原子领取、退避、死信、崩溃回收、凭据行 purge | `test_memory_outbox.py` 23/23 |
+| `memory_writer.py` | Graphiti 主路（写前查重，因 /episodes 非幂等）+ Neo4j 兜底(degraded) + 诚实回读 | `test_memory_writer.py` 24/24 |
+| `memory_audit.py` | 有结论未入图 / 未确认写入 / 降级 / 死信 / 覆盖率（只认 verified） | `test_memory_audit.py` 14/14 |
+| `memory_pipeline.py` | 统一入口 remember / record_verdict / record_terminal | `test_hub_terminal_memory.py` 10/10 |
+| `uai_memory.py` | 四席位统一 CLI：remember / recall / audit / flush / replay | 加固回归 `test_memory_hardening.py` 36/36 |
+| `outcome_recorder.py` | **已弃用（保留一版过渡）**：生产写入点已迁到 `memory_pipeline.py`；本模块只剩 `graph_writes_enabled()` 被 hub 引用，其余仅作历史兼容 | `test_uai08_graph_write.py` **21/21**（含真图谱写入与去重）；`test_seat_heartbeat_loop.py` **8/8**（席位心跳循环持续运行与重注册——常驻面锁死的回归防线） |
 | `resident_health.py` | **常驻面自检**：语义判定（NATS/JetStream/reconcile/席位锁/图谱/账本新鲜/监督唯一），`--repair` 自救、`--restart` 显式重启 | 实测 14 项全绿；`--restart` 清场后 20s 恢复 |
 | `drill_resident_plane.py` | **常驻面演练**：硬杀中枢/席位、重复自启幂等、全杀后靠自启恢复 | **14/14** |
 | `ledger_archive.py` | **UAI-09 心跳归档**：字节级抽取 + 清单 + 校验 + 桥接压缩（只另存，不改源） | `test_uai09_ledger_archive.py` **36/36** |
