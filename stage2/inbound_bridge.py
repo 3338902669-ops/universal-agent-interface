@@ -31,6 +31,18 @@ class InboundBridgeError(RuntimeError):
     pass
 
 
+_CREDENTIAL_REJECTION = "credential_like_field_in_envelope"
+
+
+def _should_retry_without_memory(error) -> bool:
+    """hub 因凭据样字样拒绝信封时，去掉记忆注入重试一次。
+
+    记忆是外部文本，可能夹带 api_key / secret 等字样；这类内容不该进指令，
+    但也不该让整个任务静默派发失败。去掉注入后原文通常可以正常投递。
+    """
+    return _CREDENTIAL_REJECTION in str(error)
+
+
 async def _connect(url: str):
     try:
         import nats
@@ -51,8 +63,22 @@ async def submit(
     approval: dict | None = None,
     contract_version: str = "1.0",
     connect_timeout_s: float = 10.0,
+    inject_memory: bool = True,
 ) -> dict:
     """投递一个 A2A 请求，返回 {envelope, hub_response, task_id, accepted}。"""
+    # I-3: 团队记忆自动注入——派发前查图谱，把相关历史事实注入 instruction
+    if inject_memory:
+        try:
+            from team_memory import TeamMemoryBridge
+            _mem = TeamMemoryBridge()
+            parts = request.get("message", {}).get("parts", [])
+            for part in parts:
+                if isinstance(part, dict) and part.get("text"):
+                    part["text"] = _mem.inject_context(part["text"], created_by)
+            _mem.close()
+        except Exception:
+            pass  # 记忆注入失败不阻塞派发
+
     envelope = inbound.envelope_from_a2a(
         request,
         created_by=created_by,
@@ -66,11 +92,33 @@ async def submit(
 
     nc = await _connect(nats_url)
     try:
-        payload = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+        payload = json.dumps(inbound.wire_format(envelope, contract_version), ensure_ascii=False).encode("utf-8")
         msg = await nc.request(SUBMIT_SUBJECT, payload, timeout=connect_timeout_s)
         hub_response = json.loads(msg.data.decode("utf-8"))
     finally:
         await nc.close()
+
+    # 记忆注入可能夹带凭据样字样；被拒时去掉注入重建信封重试一次
+    if not hub_response.get("ok", False) and inject_memory:
+        reason = str(hub_response.get("reason") or "")
+        if _CREDENTIAL_REJECTION in reason:
+                envelope = inbound.envelope_from_a2a(
+                    request,
+                    created_by=created_by,
+                    target_interface=target_interface,
+                    target_capability=target_capability,
+                    timeout_s=timeout_s,
+                    cls=cls,
+                    approval=approval,
+                    contract_version=contract_version,
+                )
+                nc = await _connect(nats_url)
+                try:
+                    payload = json.dumps(inbound.wire_format(envelope, contract_version), ensure_ascii=False).encode("utf-8")
+                    msg = await nc.request(SUBMIT_SUBJECT, payload, timeout=connect_timeout_s)
+                    hub_response = json.loads(msg.data.decode("utf-8"))
+                finally:
+                    await nc.close()
 
     accepted = bool(hub_response.get("ok", False))
     task_id = hub_response.get("task_id") or envelope["task_id"]

@@ -1,0 +1,331 @@
+{
+  "schema": "uai.detect-probes/v1",
+  "note": "每个 agent 一条：探测命令、就绪/认证失败特征、能力标签、适配器。没装≠认证失败≠版本不兼容。",
+  "agents": [
+    {
+      "id": "dsh",
+      "label": "DSH",
+      "vendor": "DeepSeek",
+      "kind": "cli",
+      "binaries": [
+        "dsh",
+        "dsh.cmd",
+        "dsh.exe"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "unauthorized",
+        "not logged in",
+        "no credentials"
+      ],
+      "capability_tags": [
+        "orchestrate",
+        "verify",
+        "edit",
+        "shell"
+      ],
+      "adapter": "stage2/runtime_adapters/dsh_adapter.py"
+    },
+    {
+      "id": "codex",
+      "label": "Codex",
+      "vendor": "OpenAI",
+      "kind": "cli",
+      "binaries": [
+        "codex",
+        "codex.cmd",
+        "codex.exe",
+        "codex.ps1"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "401",
+        "unauthorized",
+        "missing bearer",
+        "api key",
+        "login"
+      ],
+      "capability_tags": [
+        "edit",
+        "shell",
+        "test"
+      ],
+      "adapter": "stage2/runtime_adapters/codex_adapter.py"
+    },
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "vendor": "Anthropic",
+      "kind": "cli",
+      "binaries": [
+        "claude",
+        "claude.cmd",
+        "claude.exe",
+        "claude.ps1"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "401",
+        "unauthorized",
+        "api key",
+        "login",
+        "authentication"
+      ],
+      "capability_tags": [
+        "edit",
+        "shell",
+        "review"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "workbuddy",
+      "label": "WorkBuddy",
+      "vendor": "WorkBuddy",
+      "kind": "cli",
+      "binaries": [
+        "workbuddy",
+        "wb"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "401",
+        "unauthorized",
+        "login"
+      ],
+      "capability_tags": [
+        "gui",
+        "forms"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "openclaw",
+      "label": "OpenClaw",
+      "vendor": "OpenClaw",
+      "kind": "cli",
+      "binaries": [
+        "openclaw",
+        "openclaw.cmd"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "401",
+        "unauthorized",
+        "login"
+      ],
+      "capability_tags": [
+        "automation",
+        "scripts"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "opencode",
+      "label": "OpenCode",
+      "vendor": "OpenCode",
+      "kind": "cli",
+      "binaries": [
+        "opencode"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "401",
+        "unauthorized",
+        "credits"
+      ],
+      "capability_tags": [
+        "edit",
+        "shell",
+        "batch"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "trae",
+      "label": "Trae",
+      "vendor": "ByteDance",
+      "kind": "gui",
+      "binaries": [
+        "trae"
+      ],
+      "processes": [
+        "trae.exe",
+        "trae"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "login",
+        "unauthorized"
+      ],
+      "capability_tags": [
+        "ide",
+        "frontend"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "cursor",
+      "label": "Cursor",
+      "vendor": "Anysphere",
+      "kind": "gui",
+      "binaries": [
+        "cursor",
+        "cursor-agent"
+      ],
+      "processes": [
+        "cursor.exe",
+        "cursor"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "login",
+        "unauthorized"
+      ],
+      "capability_tags": [
+        "ide",
+        "codebase-qa"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini CLI",
+      "vendor": "Google",
+      "kind": "cli",
+      "binaries": [
+        "gemini",
+        "gemini.cmd"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "401",
+        "unauthorized",
+        "api key"
+      ],
+      "capability_tags": [
+        "research",
+        "multimodal"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "aider",
+      "label": "Aider",
+      "vendor": "Aider",
+      "kind": "cli",
+      "binaries": [
+        "aider"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "401",
+        "unauthorized",
+        "api key"
+      ],
+      "capability_tags": [
+        "edit",
+        "commit"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "ollama",
+      "label": "Ollama",
+      "vendor": "Ollama",
+      "kind": "local",
+      "binaries": [
+        "ollama"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "http_probe": "http://127.0.0.1:11434/api/tags",
+      "auth_fail_patterns": [],
+      "capability_tags": [
+        "local-inference"
+      ],
+      "adapter": null
+    },
+    {
+      "id": "rivet",
+      "label": "天枢 rivet",
+      "vendor": "internal",
+      "kind": "cli",
+      "binaries": [
+        "rivet",
+        "rivet.cmd",
+        "rivet.ps1"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "ready_hints": [
+        "\\d+\\.\\d+"
+      ],
+      "auth_fail_patterns": [
+        "401",
+        "unauthorized",
+        "api key"
+      ],
+      "capability_tags": [
+        "verify",
+        "worker"
+      ],
+      "adapter": "stage2/runtime_adapters/tianshu_adapter.py"
+    }
+  ]
+}

@@ -22,6 +22,23 @@ import nats
 from nats.aio.client import Client as NATS
 from nats.aio.msg import Msg
 
+from dispatch_contract import build_runtime_instruction
+
+
+def _recall_suffix(envelope: dict[str, Any]) -> str:
+    """B：派单前按任务描述取团队记忆，注入到 prompt 里。
+
+    不能指望席位自己想起 recall（实测 codex 会去读源码而不是查记忆）；
+    由中枢注入，席位不需要自觉也能站在团队事实上工作。
+    """
+    try:
+        from memory_bridge import recall_block
+    except Exception:
+        return ""
+    try:
+        return recall_block(str(envelope.get("instruction") or ""))
+    except Exception:
+        return ""
 from core import (
     CONTRACT_VERSION,
     AppendOnlyJsonl,
@@ -234,6 +251,7 @@ class InterfaceProcess:
         suppress_echo: bool,
         executor: str,
         runtime_executable: str,
+        work_root: Path | None = None,
     ):
         self.base = base
         self.interface_id = interface_id
@@ -250,7 +268,9 @@ class InterfaceProcess:
         self.runtime_executable = runtime_executable
         self.data_dir = base / "runtime" / "interfaces" / safe_id(interface_id)
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.work_dir = self.data_dir / "work"
+        # work_root 给定时任务目录放在它下面（同一沙箱边界内）
+        self.work_root = Path(work_root) if work_root else None
+        self.work_dir = (self.work_root / ".uai-work") if self.work_root else (self.data_dir / "work")
         self.results_dir = self.data_dir / "results"
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -407,10 +427,15 @@ class InterfaceProcess:
             return self.registered
 
     async def heartbeat_loop(self) -> None:
+        sent = 0                     # 已发送心跳计数（用于限频日志）
+        ticks = 0                    # 循环轮次（未连接时也计数，用于限频）
         while not self.stop_event.is_set():
             try:
                 await asyncio.sleep(self.heartbeat_s)
+                ticks += 1
                 if not self.nc or not self.nc.is_connected:
+                    if ticks % 30 == 1:
+                        self.log_connection("heartbeat_skipped", reason="nats_not_connected")
                     continue
                 if not self.registered:
                     await self.register()
@@ -428,7 +453,20 @@ class InterfaceProcess:
                     "hub.heartbeat", canonical_json(request), timeout=2
                 )
                 value = json.loads(reply.data.decode("utf-8"))
-                if value.get("must_register"):
+                # 中枢重启/会话丢失时，注册状态在席位这边是过期的：
+                # 只认 must_register 不够（旧中枢回的是 unauthorized），
+                # 任何"不 ok"的回复都当成"重新注册一次"的信号。
+                sent += 1
+                if sent == 1 or sent % 30 == 0 or not value.get("ok"):
+                    self.log_connection("heartbeat_reply", seq=sent,
+                                         ok=bool(value.get("ok")),
+                                         reason=value.get("reason"))
+                if value.get("must_register") or not value.get("ok"):
+                    self.registered = False
+                    self.log_connection(
+                        "re_register_requested",
+                        reason=value.get("reason"),
+                    )
                     await self.register()
             except asyncio.CancelledError:
                 return
@@ -607,6 +645,47 @@ class InterfaceProcess:
         async with self.outbox_lock:
             return await self._flush_once_locked()
 
+    async def _flush_one_event(self, row: dict[str, Any]) -> bool:
+        """投递**单条**事件。claim 用它在认领前冲掉本任务的积压，
+        避免 force_flush_outbox() 的全局阻塞（codex 审代码第 1 条）。"""
+        if not self.nc or not self.nc.is_connected:
+            return False
+        event = {
+            "task_id": row["task_id"],
+            "trace_id": row["trace_id"],
+            "seq": row["seq"],
+            "fencing_generation": row["fencing_generation"],
+            "kind": row["kind"],
+            "payload": row["payload"],
+            "created_at": row["created_at"],
+        }
+        request = make_proof(self.token, {
+            "kind": "event",
+            "interface_id": self.interface_id,
+            "event": event,
+            "sent_at": now_iso(),
+        })
+        try:
+            reply = await self.nc.request("hub.event", canonical_json(request),
+                                         timeout=self.event_timeout_s)
+            response = json.loads(reply.data.decode("utf-8"))
+        except Exception:
+            return False
+        if response.get("ok"):
+            self.state.ack_event(row["event_id"], True, response)
+            return True
+        reason = str(response.get("reason"))
+        if reason in ("seq_gap", "task_not_found", "unknown_task", "task_terminal",
+                     "fencing_stale", "fencing_rejected"):
+            self.state.ack_event(row["event_id"], True,
+                                 {"dropped": True, "reason": reason})
+            self.log_connection("event_dropped", task_id=row["task_id"],
+                                seq=row["seq"], reason=reason)
+            return True
+        self.state.ack_event(row["event_id"], False, response)
+        return False
+
+
     async def _flush_once_locked(self) -> bool:
         if not self.nc or not self.nc.is_connected:
             return False
@@ -642,12 +721,43 @@ class InterfaceProcess:
                 if response.get("ok"):
                     self.state.ack_event(row["event_id"], True, response)
                 else:
+                    reason = str(response.get("reason"))
+                    # hub 对 seq 与任务终态是权威。下面这些拒绝是**不会再变好**的：
+                    # seq_gap = 本席重启后事件序号与 hub 记录脱节；task_not_found/终态 = 任务已不归本席。
+                    # 若继续当 pending 重试，claim() 会因「backlog 未清空」永远 return None
+                    # → 席位活着、锁在握、心跳正常，却永不认领任务（2026-11-18 实测：
+                    #   一次 306s 超时把 codex 席位永久毒化）。
+                    if reason in (
+                        "seq_gap",
+                        "task_not_found",
+                        "unknown_task",
+                        "task_terminal",
+                        "fencing_stale",   # hub 实际返回的是这个词（codex 审出我写错成 fencing_rejected）
+                        "fencing_rejected",
+                    ):
+                        self.state.ack_event(
+                            row["event_id"],
+                            True,
+                            {
+                                "dropped": True,
+                                "reason": reason,
+                                "expected_seq": response.get("expected_seq"),
+                            },
+                        )
+                        self.log_connection(
+                            "event_dropped",
+                            task_id=row["task_id"],
+                            seq=row["seq"],
+                            reason=reason,
+                            expected_seq=response.get("expected_seq"),
+                        )
+                        continue
                     self.state.ack_event(row["event_id"], False, response)
                     self.log_connection(
                         "event_rejected",
                         task_id=row["task_id"],
                         seq=row["seq"],
-                        reason=response.get("reason"),
+                        reason=reason,
                     )
             except asyncio.TimeoutError:
                 self.state.ack_event(
@@ -690,11 +800,18 @@ class InterfaceProcess:
             },
         )
         try:
-            # The event backlog must finish before any new task claim.
-            if self.state.pending_events():
-                await self.force_flush_outbox()
-                if self.state.pending_events():
+            # 只冲**本任务**的积压，绝不调 force_flush_outbox()：
+            # 那会循环到所有任务的事件清空，等于把全局阻塞加回来（codex 两轮审出）。
+            pending_for_task = [
+                row for row in self.state.pending_events()
+                if row["task_id"] == task_id
+            ][:20]
+            for row in pending_for_task:
+                if not await self._flush_one_event(row):
                     return None
+            if any(row["task_id"] == task_id for row in self.state.pending_events()):
+                return None
+
             reply = await self.nc.request(
                 "hub.claim", canonical_json(request), timeout=3
             )
@@ -836,6 +953,46 @@ class InterfaceProcess:
             else:
                 raise RuntimeError("test executor requires params.test_mode")
 
+            # I-2: 协商语义集成——检测 agent 返回的协商信号
+            negotiation_response = None
+            try:
+                content_str = content.decode("utf-8", errors="replace")
+                import re as _re
+                m_reject = _re.search(r"\[NEGOTIATION:REJECT\]\s*(.+)", content_str)
+                m_counter = _re.search(r"\[NEGOTIATION:COUNTER_OFFER\]\s*(.+)", content_str)
+                m_delegate = _re.search(r"\[NEGOTIATION:DELEGATE:(\S+)\]", content_str)
+                if m_reject:
+                    negotiation_response = {"type": "reject", "reason": m_reject.group(1)[:200]}
+                elif m_delegate:
+                    negotiation_response = {"type": "delegate", "target": m_delegate.group(1)}
+                elif m_counter:
+                    negotiation_response = {"type": "counter_offer", "conditions": m_counter.group(1)[:200]}
+            except Exception:
+                pass
+
+            if negotiation_response and negotiation_response["type"] in ("reject", "delegate"):
+                # agent 拒绝/转派 → 发协商事件，不标记成功
+                self.state.append_event(
+                    interface_id=self.interface_id,
+                    task_id=task_id,
+                    trace_id=trace_id,
+                    seq=seq,
+                    fencing_generation=generation,
+                    kind="negotiation_rejected",
+                    payload={"negotiation": negotiation_response},
+                )
+                seq += 1
+                await self.state.execution_finished(
+                    task_id, False, f"negotiation_{negotiation_response['type']}"
+                )
+                self.operation(
+                    task_id,
+                    "negotiation_response",
+                    task_id,
+                    json.dumps(negotiation_response, ensure_ascii=False),
+                )
+                return
+
             heartbeat_stop.set()
             if heartbeat_task:
                 with contextlib.suppress(asyncio.CancelledError):
@@ -921,6 +1078,45 @@ class InterfaceProcess:
             self.active_tasks.pop(task_id, None)
             asyncio.create_task(self.force_flush_outbox())
 
+
+    def _roster(self) -> tuple[list[str], str]:
+        """本机声明的席位名册。与监督器同源（seats.yml 的 seat 槽位），不新增协议。
+
+        为什么要注入这段：派单只传 instruction 时，agent 完全不知道自己在哪个框架里、
+        同伴是谁、自己这一手该交什么。实测（2026-11-18）问 dsh 席「你知道同伴吗」，
+        它回答 UNKNOWN —— 这就是「面板 4 席运行中」与「agent 真协作」之间的差。
+        """
+        try:
+            from uai_core import config as _cfg
+
+            cfg = _cfg.load(None)
+            ids = []
+            for spec in (cfg.get("processes") or []):
+                lock = str(spec.get("lock") or "")
+                if lock.startswith("seat:"):
+                    ids.append(lock.split(":", 1)[1])
+            if ids:
+                return sorted(set(ids)), "seats.yml"
+        except Exception:
+            pass
+        return [self.interface_id], "fallback"
+
+    def _preamble(self, envelope: dict[str, Any]) -> str:
+        """派单前言：一屏之内交代「你是谁 / 同伴有谁 / 分工口径 / 回执格式」。"""
+        seats, source = self._roster()
+        peers = [s for s in seats if s != self.interface_id]
+        peer_text = ", ".join(peers) if peers else "（本机未声明其他席位）"
+        cls = str(envelope.get("cls") or "readonly")
+        # 必须**单行**：dsh/codex/rivet 的 CLI 只把首个参数当 prompt，
+        # 带换行的前言会让它们只看到第一行（实测：三席都回「没有任务」）。
+        return (
+            "【UAI 协作上下文】你是 UAI 框架的 " + self.interface_id + " 席。"
+            "同一框架内声明的其他席位：" + peer_text + "（来源：" + source + "）。"
+            "分工口径（标准协作模式四件套）：实现 → 审代码 → 实测验 → 回读对账；谁实现谁不自审。"
+            "本次派单类别：" + cls + "；只做被要求的那一件事，不越权修改他人产物。"
+            "回执只输出结果正文（结论 + 依据），不写文件，不复述本段上下文。"
+        )
+
     async def execute_runtime(
         self, envelope: dict[str, Any]
     ) -> tuple[bytes, str]:
@@ -930,8 +1126,12 @@ class InterfaceProcess:
         stdout_path = self.results_dir / task_id / "runtime.stdout.jsonl"
         stderr_path = self.results_dir / task_id / "runtime.stderr.log"
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_cmd = [self.runtime_executable]
+        if self.runtime_executable.lower().endswith(".py"):
+            # Windows 无法直接 spawn .py；Python 解释器包装（P0 外部 runtime 接入实测踩过）
+            runtime_cmd = [sys.executable, self.runtime_executable]
         command = [
-            self.runtime_executable,
+            *runtime_cmd,
             "exec",
             "--skip-git-repo-check",
             "--sandbox",
@@ -940,7 +1140,10 @@ class InterfaceProcess:
             "--json",
             "-C",
             str(workdir),
-            envelope["instruction"],
+            build_runtime_instruction(
+                envelope,
+                self._preamble(envelope) + await asyncio.to_thread(_recall_suffix, envelope),
+            ),
         ]
         self.operation(
             task_id,
@@ -949,6 +1152,9 @@ class InterfaceProcess:
             "started",
         )
         timeout_s = float(envelope["timeout_s"])
+        task_contract = (envelope.get("params") or {}).get("task_contract") or {}
+        if task_contract:
+            timeout_s = min(timeout_s, float(task_contract["time_limit_s"]))
         completed = await asyncio.to_thread(
             subprocess.run,
             command,
@@ -1051,6 +1257,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-concurrency", type=int, default=2)
     parser.add_argument("--disable-heartbeat", action="store_true")
     parser.add_argument("--suppress-echo", action="store_true")
+    parser.add_argument(
+        "--work-root",
+        type=Path,
+        default=None,
+        help="任务工作目录根：给了就在 <root>/.uai-work/<task_id> 下跑，"
+        "使受限 runtime（rivet 沙箱）能访问该根内的仓库；不给则沿用 base 下空目录",
+    )
     parser.add_argument("--executor", choices=["runtime", "test"], default="test")
     parser.add_argument(
         "--runtime-executable",
@@ -1065,8 +1278,73 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+EXIT_SEAT_ALREADY_RUNNING = 3
+
+
+def _acquire_seat_singleton(base: Path, interface_id: str):
+    """同一席位 id 只允许一个进程。
+
+    中枢侧已有单例锁（UAI-13），席位侧原来没有：手动再起一个 interface.py 就能和
+    常驻那个并存，而中枢只按 interface_id 认会话——它看不出身后站了两个写者。
+    """
+    import sys as _sys
+
+    stage2 = Path(__file__).resolve().parent.parent / "stage2"
+    if str(stage2) not in _sys.path:
+        _sys.path.insert(0, str(stage2))
+    try:
+        from hub_singleton import HubSingleton
+    except Exception as exc:
+        return None, {"reason": "singleton_unavailable:%s" % str(exc)[:100]}
+
+    guard = HubSingleton(
+        Path(base) / "data" / ("seat-%s.lock" % interface_id),
+        namespace="uai-seat:%s" % interface_id,
+        ttl_s=float(os.environ.get("UAI_SEAT_SINGLETON_TTL", "600")),
+    )
+    ok, info = guard.acquire()
+    return (guard, info) if ok else (None, info)
+
+
+def _renew_seat_lock_forever(guard) -> None:
+    """守护线程续期。TTL 只用于告警；真裁决在 OS 独占锁上。"""
+    import threading
+    import time as _time
+
+    def _loop() -> None:
+        while True:
+            _time.sleep(max(5.0, float(guard.ttl_s) / 3.0))
+            try:
+                guard.heartbeat()
+            except Exception:
+                return
+
+    threading.Thread(target=_loop, name="seat-lock-heartbeat", daemon=True).start()
+
+
 def main() -> int:
     args = parse_args()
+    base = args.base.resolve()
+    guard, info = _acquire_seat_singleton(base, args.interface_id)
+    if guard is None:
+        # 第二个同 id 席位**不许**静默共存：中枢会把一个 id 当成两个写者。
+        print(
+            json.dumps(
+                {
+                    "event": "seat_singleton_denied",
+                    "interface_id": args.interface_id,
+                    "reason": info.get("reason"),
+                    "holder": info.get("holder"),
+                    "pid": os.getpid(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return EXIT_SEAT_ALREADY_RUNNING
+    _renew_seat_lock_forever(guard)
+    import atexit
+    atexit.register(guard.release)
     process = InterfaceProcess(
         base=args.base.resolve(),
         interface_id=args.interface_id,
@@ -1080,6 +1358,7 @@ def main() -> int:
         suppress_echo=args.suppress_echo,
         executor=args.executor,
         runtime_executable=args.runtime_executable,
+        work_root=args.work_root,
     )
     try:
         asyncio.run(process.run())

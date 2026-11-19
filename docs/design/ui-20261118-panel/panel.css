@@ -1,0 +1,191 @@
+/* UAI 看板 · 设计令牌与样式（唯一源）
+ * 生成物：packages/uai-dsh-bundle/lib/panel-css.js（scripts/build-css.mjs 生成，勿手改生成物）
+ * 令牌依据：docs/design/ui-20261118-panel/verify/contrast.mjs 的实测比值（12/12 达标）
+ * 概念：控制室仪表排 —— 先看数，再看灯，最后才看字。无卡片墙、无圆角、无发光边框。
+ */
+
+:root,
+.uai-panel {
+  /* 表面（三级：页 / 面板 / 抬升） */
+  --uai-bg1: #020617;
+  --uai-bg2: #0E1223;
+  --uai-bg3: #1A1E2F;
+
+  /* 文字（fg3 已由 #5C6B85 提到 #7C8AA6：原值只有 3.6:1，不够 AA） */
+  --uai-fg1: #F8FAFC;   /* 17.77:1 on bg2 */
+  --uai-fg2: #94A3B8;   /* 7.25:1  on bg2 */
+  --uai-fg3: #7C8AA6;   /* 5.35:1  on bg2 */
+
+  /* 线：装饰线只做分隔（1.80:1），控件边框必须过 3:1 */
+  --uai-line: #334155;    /* 1.80:1 装饰 */
+  --uai-line-2: #556784;  /* 3.24:1 控件边框 */
+
+  /* 状态（都由实测修正过：#DC2626→#F04438、#F59E0B→#F5A524、#22C55E→#3DDC84） */
+  --uai-green: #3DDC84;   /* 10.42:1 */
+  --uai-amber: #F5A524;   /* 9.11:1  */
+  --uai-red: #F04438;     /* 4.95:1  */
+  --uai-accent: #16A34A;
+  --uai-accent-ink: #04140A;
+
+  /* 排版：UI 密排 1.45，数字一律等宽 + tabular */
+  --uai-font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --uai-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;
+  --uai-fs-micro: 11px;
+  --uai-fs-sm: 12px;
+  --uai-fs-base: 13px;
+  --uai-fs-lead: 16px;
+  --uai-fs-title: 19px;
+
+  /* 间距 8pt 网格 */
+  --uai-s1: 4px;
+  --uai-s2: 8px;
+  --uai-s3: 12px;
+  --uai-s4: 16px;
+  --uai-s5: 24px;
+  --uai-row: 36px;
+
+  /* 运动：低预算档 —— 只有状态切换与焦点反馈，无入场、无视差 */
+  --uai-dur: 160ms;
+  --uai-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.uai-panel,
+.uai-panel * { box-sizing: border-box; }
+
+.uai-panel {
+  background: var(--uai-bg1);
+  color: var(--uai-fg1);
+  font-family: var(--uai-font);
+  font-size: var(--uai-fs-base);
+  line-height: 1.45;
+  min-height: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 顶栏：标题 + 计数徽标 + 两个动作 ───────────────────────────── */
+.uai-head {
+  display: flex; align-items: center; gap: 10px;
+  height: 52px; padding: 0 var(--uai-s3);
+  background: var(--uai-bg2);
+  border-bottom: 1px solid var(--uai-line);
+}
+.uai-title { font-size: var(--uai-fs-title); font-weight: 600; letter-spacing: -0.01em; }
+.uai-badge {
+  font-family: var(--uai-mono); font-size: var(--uai-fs-micro);
+  letter-spacing: 0.08em; color: var(--uai-fg2);
+  border: 1px solid var(--uai-line); padding: 2px 6px;
+}
+.uai-actions { margin-left: auto; display: flex; gap: var(--uai-s2); }
+
+.uai-btn {
+  height: 30px; padding: 0 var(--uai-s3);
+  border: 1px solid var(--uai-line-2); background: transparent; color: var(--uai-fg1);
+  font: inherit; font-size: var(--uai-fs-base); cursor: pointer;
+  transition: background var(--uai-dur) var(--uai-ease),
+              border-color var(--uai-dur) var(--uai-ease),
+              transform var(--uai-dur) var(--uai-ease);
+}
+.uai-btn:hover:not(:disabled) { background: var(--uai-bg3); border-color: var(--uai-fg3); }
+.uai-btn:active:not(:disabled) { transform: translateY(1px); }
+.uai-btn:disabled { opacity: 0.55; cursor: default; }
+.uai-btn--primary { background: var(--uai-bg3); border-color: var(--uai-line-2); color: var(--uai-fg1); font-weight: 600; }
+.uai-btn--primary:hover:not(:disabled) { background: #232841; border-color: var(--uai-fg3); }
+
+/* 焦点：键盘可见，不靠颜色单独传达 */
+.uai-panel :focus-visible {
+  outline: 2px solid var(--uai-green);
+  outline-offset: 2px;
+}
+
+/* ── Bento 仪表块 ────────────────────────────────────────────── */
+.uai-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;                     /* 用 1px gap + 底色造分隔线，避免额外边框 */
+  background: var(--uai-line);
+  border-bottom: 1px solid var(--uai-line);
+}
+.uai-cell {
+  background: var(--uai-bg2);
+  padding: var(--uai-s3);
+  display: flex; flex-direction: column; gap: var(--uai-s1);
+  min-width: 0;
+}
+.uai-cell__k {
+  font-size: var(--uai-fs-micro); letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--uai-fg2);
+}
+.uai-cell__v {
+  font-family: var(--uai-mono); font-size: 22px; line-height: 1.1;
+  display: flex; align-items: baseline; gap: var(--uai-s2);
+}
+.uai-cell__u { font-size: var(--uai-fs-sm); color: var(--uai-fg3); font-family: var(--uai-font); }
+.uai-cell__note { font-size: var(--uai-fs-sm); color: var(--uai-fg3); }
+
+/* ── 表：席位一行为一席，36px 密排 ──────────────────────────── */
+.uai-section { border-bottom: 1px solid var(--uai-line); }
+.uai-section__h {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 30px; padding: 0 var(--uai-s3);
+  background: var(--uai-bg2);
+  font-size: var(--uai-fs-micro); letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--uai-fg2);
+}
+.uai-section__h span:last-child { font-family: var(--uai-mono); letter-spacing: 0; }
+
+.uai-row {
+  display: grid;
+  /* 四列：名字 / 状态 / 锁来源 / pid（pid 贴右端，锁源紧跟状态，避免串成一句话） */
+  grid-template-columns: minmax(0, 200px) 88px minmax(0, 132px) minmax(0, 1fr);
+  align-items: center; gap: var(--uai-s3);
+  height: var(--uai-row); padding: 0 var(--uai-s3);
+  border-top: 1px solid var(--uai-line);
+  transition: background var(--uai-dur) var(--uai-ease);
+}
+.uai-row:hover { background: var(--uai-bg3); }
+.uai-row__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uai-row__state { display: inline-flex; align-items: center; gap: 6px; font-size: var(--uai-fs-sm); color: var(--uai-fg2); }
+.uai-row__meta { font-family: var(--uai-mono); font-size: var(--uai-fs-sm); color: var(--uai-fg3); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uai-row__src { font-family: var(--uai-mono); font-size: var(--uai-fs-micro); color: var(--uai-fg3); letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 状态灯：形状 + 颜色双编码（不只靠颜色） */
+.uai-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; background: var(--uai-fg3); }
+.uai-dot--on { background: var(--uai-green); }
+.uai-dot--warn { background: var(--uai-amber); }
+.uai-dot--off { background: var(--uai-red); }
+
+/* ── 检测结果：标签 + 状态 + 路径 ───────────────────────────── */
+.uai-section--alt { background: var(--uai-bg2); }
+.uai-section--alt .uai-section__h { background: transparent; border-bottom: 1px solid var(--uai-line); }
+.uai-cap { display: flex; flex-wrap: wrap; gap: var(--uai-s1); padding: var(--uai-s3); background: var(--uai-bg3); }
+.uai-tag {
+  font-family: var(--uai-mono); font-size: var(--uai-fs-micro); letter-spacing: 0.06em;
+  border: 1px solid var(--uai-line); color: var(--uai-fg2);
+  padding: 2px 6px; text-transform: uppercase;
+}
+.uai-tag--ready { border-color: rgba(61, 220, 132, 0.45); color: var(--uai-green); }
+
+.uai-empty { padding: var(--uai-s3); color: var(--uai-fg2); font-size: var(--uai-fs-sm); }
+.uai-error {
+  margin: var(--uai-s3); padding: var(--uai-s3);
+  border: 1px solid var(--uai-red); color: var(--uai-red); font-size: var(--uai-fs-sm);
+}
+
+/* ── 390px：单列，行内改成两行 ──────────────────────────────── */
+@media (max-width: 560px) {
+  .uai-grid { grid-template-columns: minmax(0, 1fr); }
+  .uai-row { grid-template-columns: minmax(0, 1fr) auto; height: auto; padding: 8px var(--uai-s3); row-gap: 2px; }
+  .uai-row__src { grid-column: 1 / -1; grid-row: 2; }
+  .uai-row__meta { grid-column: 1 / -1; grid-row: 3; text-align: left; }
+  .uai-head { height: auto; padding: 8px var(--uai-s3); flex-wrap: wrap; }
+  .uai-actions { margin-left: 0; width: 100%; }
+  .uai-btn { flex: 1 1 auto; }
+}
+
+/* ── 低运动预算的降级：用户要求减少动效时全部瞬切 ───────────── */
+@media (prefers-reduced-motion: reduce) {
+  .uai-panel, .uai-panel * {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}

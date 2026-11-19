@@ -39,3 +39,18 @@ htmlcov/
 # E-02 published fixtures (root 'fixtures/' would otherwise ignore them)
 !bench/controlled_experiment/fixtures/
 !bench/controlled_experiment/fixtures/**
+
+# 2026-11-15 本机新增排除
+prototype/_ext_agent_e2e.py
+prototype/hub.py.bak-*
+stage2/%SystemDrive%/
+stage2/_apn_work/
+stage2/data/
+
+# 端到端测试环境（含 token，不入库）
+prototype_clean/
+
+# tianshu (rivet) 在 adapter 工作目录里生成的 hooks
+stage2/.rivet/
+# 席位任务工作目录（运行时产物，含 rivet 项目信任库，不入库）
+.uai-work/

@@ -23,6 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r protocol/tests/conformance/requirements.txt
           python -m pip install nats-py
+          python -m pip install -e packages/uai-core   # stage2 依赖 uai_core（P0 抽包）
 
       - name: Fetch official A2A proto (pinned, sha256-checked)
         run: |

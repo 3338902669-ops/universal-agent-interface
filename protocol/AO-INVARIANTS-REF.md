@@ -32,7 +32,7 @@
 
 | AO 要求 | UAI 原缺口 | 现在 |
 |---|---|---|
-| **C1** 三轮失败阻塞 | 无 blocked 态 | `unified.py: failed_verifications>=3 → blocked`（B-01） |
+| **C1** 三轮失败阻塞 | 无 blocked 态 | `unified.py` 的 `RoundsTracker`：**连续三轮同一阻塞原因**才 `blocked`；成功一轮即解除；已阻塞后换原因不能洗白（B-01，`test_b01_rounds.py` 25/25） |
 | **C2** 阻塞任务拒绝认领/完成/审批 | 同上 | `reassign.py` 拒绝改派 blocked 任务（A-11） |
 | **E1–E4 证据等级** | 只有载荷没有等级 | `protocol/unified/evidence-record.schema.json`（A-07） |
 

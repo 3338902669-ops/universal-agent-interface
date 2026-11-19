@@ -21,7 +21,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r protocol/tests/conformance/requirements.txt
-          python -m pip install nats-py
+          python -m pip install nats-py pytest
+          # stage2 的 hub_singleton 现在是 uai_core 的薄壳（P0 抽包）；
+          # 不装这个包，test_a09_singleton 会因为 ImportError 直接判红。
+          python -m pip install -e packages/uai-core
 
       # 两条来源合并：本仓已入库官方 proto 的未修改副本（a2a-official-spec/），
       # 这里再拿 pin 死的上游 sha256 校验它没漂移。校验不需要联网，
@@ -49,6 +52,29 @@ jobs:
           python test_a09_singleton.py
           python test_b02_ao_refs.py
           python test_p2_batch.py
+
+      - name: Panel design CSS in sync (bundle)
+        # 设计只有一份源：docs/design/ui-20261118-panel/panel.css。
+        # bundle 的 lib/panel-css.js 与 lib/client.js 内联区段都是生成物，
+        # 不同步就判红，防止「改了 CSS 忘了 build」导致线上样式与设计不符。
+        run: node packages/uai-dsh-bundle/scripts/build-css.mjs --check
+
+      - name: Bundle client self-test
+        run: node packages/uai-dsh-bundle/test/client-selftest.mjs
+
+      - name: Core package self-tests (uai-core)
+        working-directory: packages/uai-core
+        run: python -m pytest tests -q 2>&1 | tee uai-core-pytest.log
+
+      # 日志端点要仓库管理员权限，普通账号看不到 —— 所以把失败输出当工件传上来，
+      # 下一次红的时候不用再猜。
+      - name: Upload uai-core test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uai-core-pytest-log
+          path: packages/uai-core/uai-core-pytest.log
+          if-no-files-found: warn
 
       - name: Cross-repo vocabulary consistency
         working-directory: stage2

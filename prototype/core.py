@@ -19,9 +19,25 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 
-CONTRACT_VERSION = "0.2"
-MAX_ENVELOPE_BYTES = 256 * 1024
-REQUIRED_ENVELOPE_FIELDS = {
+CONTRACT_VERSION = "1.0"
+SUPPORTED_CONTRACT_VERSIONS = ("1.0", "0.2")
+MAX_ENVELOPE_BYTES = 256 * 1024  # v0.2 与 v1 均为 262,144 字节
+# v1（contract-v1.md §3）：11 必填 + 6 可选
+REQUIRED_ENVELOPE_FIELDS_V1 = {
+    "contract_version",
+    "envelope_id",
+    "task_id",
+    "idempotency_key",
+    "target",
+    "instruction",
+    "timeout_s",
+    "cls",
+    "created_by",
+    "created_at",
+    "trace_id",
+}
+# v0.2 遗留（spec-v0.2 §4）：13 必填
+REQUIRED_ENVELOPE_FIELDS_V02 = {
     "contract_version",
     "task_id",
     "idempotency_key",
@@ -37,6 +53,7 @@ REQUIRED_ENVELOPE_FIELDS = {
     "created_at",
     "trace_id",
 }
+VALID_PRIORITIES = {"high", "standard", "low"}
 VALID_CLASSES = {"readonly", "reversible", "external"}
 VALID_EVENT_KINDS = {
     "accepted",
@@ -194,11 +211,34 @@ def validate_envelope(raw: bytes | str | dict[str, Any]) -> tuple[bool, str | No
 
     if not isinstance(value, dict):
         return False, "not_object", None
-    missing = sorted(REQUIRED_ENVELOPE_FIELDS - value.keys())
+    version = value.get("contract_version")
+    if version == "1.0":
+        required = REQUIRED_ENVELOPE_FIELDS_V1
+        optional = {"skill_ref", "resource_key", "params", "attachments",
+                    "priority", "approval", "context_id"}
+    elif version == "0.2":
+        required = REQUIRED_ENVELOPE_FIELDS_V02
+        optional = set()
+    else:
+        return False, "unsupported_contract_version", None
+    missing = sorted(required - value.keys())
     if missing:
         return False, "missing_fields:" + ",".join(missing), None
-    if value["contract_version"] != CONTRACT_VERSION:
-        return False, "unsupported_contract_version", None
+    unknown = sorted(set(value.keys()) - required - optional)
+    if unknown:
+        return False, "unknown_fields:" + ",".join(unknown), None
+    if version == "1.0":
+        envelope_id = value.get("envelope_id")
+        if not isinstance(envelope_id, str) or not envelope_id:
+            return False, "invalid_envelope_id", None
+        priority = value.get("priority")
+        if priority is not None and priority not in VALID_PRIORITIES:
+            return False, "invalid_priority", None
+        # v1：可选字段缺省为 None 时按缺省处理；attachments 提供了才校验
+        if value.get("attachments") is not None and not isinstance(value["attachments"], list):
+            return False, "invalid_attachments", None
+    elif not isinstance(value["attachments"], list):
+        return False, "invalid_attachments", None
     try:
         uuid.UUID(str(value["task_id"]))
     except (ValueError, TypeError, AttributeError):
@@ -212,15 +252,27 @@ def validate_envelope(raw: bytes | str | dict[str, Any]) -> tuple[bool, str | No
         return False, "target_must_name_exactly_one", None
     if not isinstance(value["instruction"], str):
         return False, "invalid_instruction", None
+    # v0.2 keeps params opaque, but a supplied task_contract is execution-critical:
+    # validate it before the hub accepts the task so bad dispatches never reach a seat.
+    try:
+        from dispatch_contract import validate_task_contract
+
+        contract_reason = validate_task_contract(value)
+    except Exception:
+        return False, "invalid_task_contract:validator_error", None
+    if contract_reason:
+        return False, contract_reason, None
     if value["cls"] not in VALID_CLASSES:
         return False, "invalid_cls", None
     if not isinstance(value["timeout_s"], (int, float)) or value["timeout_s"] <= 0:
         return False, "invalid_timeout_s", None
-    if value["resource_key"] is not None and not isinstance(value["resource_key"], str):
+    resource_key = value.get("resource_key")
+    if resource_key is not None and not isinstance(resource_key, str):
         return False, "invalid_resource_key", None
-    if not isinstance(value["attachments"], list):
+    attachments = value.get("attachments")
+    if attachments is not None and not isinstance(attachments, list):
         return False, "invalid_attachments", None
-    for attachment in value["attachments"]:
+    for attachment in (attachments or []):
         if not isinstance(attachment, dict):
             return False, "invalid_attachment", None
         uri = attachment.get("uri")

@@ -12,17 +12,34 @@
 |---|---|---|
 | `projection.py` | 纯函数投影：名片→AgentCard、八态→TaskState、事件→A2A 事件、裁定归一 | `test_projection.py` **10/10** |
 | `a2a_server.py` | 只读 HTTP：`/.well-known/agent-card.json`、`/tasks`、`/tasks/<id>` | `test_a2a_server.py` **12/12** |
-| `inbound.py` | A2A 请求 → 契约 v1 信封（幂等键派生、附件指纹、凭据拦截） | `test_io.py` **27/27** |
+| `inbound.py` | A2A 请求 → 契约 v1 信封（幂等键派生、附件指纹、凭据拦截、**wire_format 版本裁剪**） | `test_io.py` **27/27** |
 | `event_bridge.py` | 账本增量 → A2A 事件 → 只追加出站信箱 | `test_bridge_joins.py` **34/34** |
-| `unified.py` | 两轴状态 + 证据等级×载荷 + 审批校验 + **核验独立性（C-05）** + **证据只认账本（C-04）** | `test_unified.py` **33/33**、`test_p1_batch.py` 中 C-04/C-05 共 16 条 |
+| `unified.py` | 两轴状态 + 证据等级×载荷 + 审批校验 + **核验独立性（C-05）** + **证据只认账本（C-04）** + **三轮连续失败阻塞（B-01，`RoundsTracker`）** | `test_unified.py` **33/33**、`test_b01_rounds.py` **25/25**、`test_p1_batch.py` 中 C-04/C-05 共 16 条 |
 | `identity.py` | LocalToken / OIDC / mTLS / Static 可插拔；无验证器不得升 `authenticated` | `test_identity.py` **10/10** |
 | `reassign.py` | 改派：围栏+1、attempt+1、必须带原因、终态不可改派 | `test_p1_batch.py` 中 A-11 共 12 条 |
-| `hub_singleton.py` | 中枢单实例：OS 文件锁 + 持有者校验 + 接管留痕 | `test_a09_singleton.py` **13/13** |
+| `hub_singleton.py` | 中枢单实例：**OS 独占锁**（`msvcrt.locking`/`flock`）裁决 + 持有者校验 + 接管留痕落盘 + 无写权拒绝派发 | `test_a09_singleton.py` **28/28**（含 8 进程真并发 + 真入口拒绝启动） |
+| 新增模块 | 说明 | 测试 |
+|---|---|---|
+| `memory_intent.py` | 六类结构化记忆契约；E1 强制带证据；凭据正则 + 递归全字段扫描，入队即拒收 | `test_memory_intent.py` 28/28 |
+| `memory_outbox.py` | SQLite durable outbox：BEGIN IMMEDIATE 原子领取、退避、死信、崩溃回收、凭据行 purge | `test_memory_outbox.py` 23/23 |
+| `memory_writer.py` | Graphiti 主路（写前查重，因 /episodes 非幂等）+ Neo4j 兜底(degraded) + 诚实回读 | `test_memory_writer.py` 24/24 |
+| `memory_audit.py` | 有结论未入图 / 未确认写入 / 降级 / 死信 / 覆盖率（只认 verified） | `test_memory_audit.py` 14/14 |
+| `memory_pipeline.py` | 统一入口 remember / record_verdict / record_terminal | `test_hub_terminal_memory.py` 10/10 |
+| `uai_memory.py` | 四席位统一 CLI：remember / recall / audit / flush / replay | 加固回归 `test_memory_hardening.py` 36/36 |
+| `outcome_recorder.py` | **已弃用（保留一版过渡）**：生产写入点已迁到 `memory_pipeline.py`；本模块只剩 `graph_writes_enabled()` 被 hub 引用，其余仅作历史兼容 | `test_uai08_graph_write.py` **21/21**（含真图谱写入与去重）；`test_seat_heartbeat_loop.py` **8/8**（席位心跳循环持续运行与重注册——常驻面锁死的回归防线） |
+| `resident_health.py` | **常驻面自检**：语义判定（NATS/JetStream/reconcile/席位锁/图谱/账本新鲜/监督唯一），`--repair` 自救、`--restart` 显式重启 | 实测 14 项全绿；`--restart` 清场后 20s 恢复 |
+| `drill_resident_plane.py` | **常驻面演练**：硬杀中枢/席位、重复自启幂等、全杀后靠自启恢复 | **14/14** |
+| `ledger_archive.py` | **UAI-09 心跳归档**：字节级抽取 + 清单 + 校验 + 桥接压缩（只另存，不改源） | `test_uai09_ledger_archive.py` **36/36** |
 | `ledger_chain.py` | 只追加账本哈希链：篡改/删链可检出 | `test_p2_batch.py` **32/32**（含 B-03/B-04） |
 | `inbound_bridge.py` | A2A 请求 → 信封 → `hub.submit` 闭环 | `test_a02_inbound.py` **8/8**（需真 lab） |
 | `check-cross-repo-vocab.py` | 跨仓词表一致性（读三仓真实文件） | **17 项 0 漂移** |
+| `a2a_server.py` do_POST | **message/send JSON-RPC 入站端点**（HTTP → hub 闭环） | `test_a04_message_send.py` **5/5**（需 lab） |
+| prototype/`ledger_seal.py` + hub 写路径 | **账本哈希链**（prev/self_hash，篡改可检出，渐进启用） | `test_s8_ledger_live.py` **5/5**（需 lab） |
+| `identity.py` Ed25519Verifier | **真签名验证器**（信任锚+验签，失败降级留 reason） | `test_eid_ed25519.py` **6/6** |
+| `identity.py` OidcVerifier | **JWT 真验签**（RS256/ES256+exp/nbf/iss/aud+kid 严格） | `test_eoidc_jwt.py` **8/8** |
+| `a2a_server.py` _stream_events | **SSE 事件流出站**（/tasks/<id>/events） | `test_a07_sse_stream.py` **3/3**（需 lab） |
 
-合计 **259 条用例**（本地全绿）。`test_a02_inbound.py` 需要真 nats+hub lab；CI 里由
+**核心套件 368 条用例全绿**（2026-11-17 实测，16 个文件）。stage2 共 53 个 `test_*.py`，其余多为需真 lab（NATS+hub）或真实外部依赖的套件，按需单独跑。2026-11-17 追加：A-09 真并发 + 入口守卫（`test_a09_singleton.py` 13→28）、B-01 轮次 25（`test_b01_rounds.py`）、UAI-08 图谱写入 21（`test_uai08_graph_write.py`）、UAI-09 归档 36（`test_uai09_ledger_archive.py`）、席位心跳循环 8（`test_seat_heartbeat_loop.py`）。常驻面另有两个非用例脚本：`resident_health.py`（自检 14 项）与 `drill_resident_plane.py`（演练 14/14）。
 `../bench/lab.py` 先把 lab 拉起来**真跑**（workflow 里有硬门：该套件若被 skip 即判红）。
 协议侧另有 `../protocol/tests/conformance/` **22 项**；`../protocol/GAR-OPEN-ITEMS-REF.md` 记录了
 C-06~C-10 这些**必须由 GAR 侧闭合**的项及验收口径。
@@ -98,12 +115,19 @@ message_texts    {'待核验': 40, '通过': 5, '带注通过': 5, '条件通过
 
 六个 canonical 裁定各 5 次（= 账本真实条数，无重复），「驳回」零残留。
 
-## 边界（没做的）
+## 边界（2026-11-15 收尾后更新）
 
-- 未接 hub 的出站推送：桥是**旁路跟随账本**，不是 hub 主动推。
-- 未接 NATS：服务是 HTTP，没走原实验室的 `iface.<id>.control`。
-- 未做 A2A 的 streaming / push notification，只做请求-响应。
-- 未做入站请求到 hub 的实际投递（只到信封为止）。
+已补上（原"没做的"清单）：
+- ~~入站请求到 hub 的实际投递~~ → `inbound_bridge.py` + a02（9/9）
+- ~~官方 HTTP 入站~~ → `a2a_server.py` do_POST message/send + a04（5/5）
+- ~~账本无哈希链~~ → prototype/ledger_seal.py 接线 + S8-live（5/5，篡改可检出）
+- ~~审批身份只到 asserted~~ → Ed25519Verifier 真验证器 + E-ID（6/6）
+
+仍然没做的（如实，2026-11-15 00:45 更新）：
+- 未接 hub 的出站推送：event_bridge 是**旁路跟随账本**，不是 hub 主动推。
+- push notification（webhook 回调）未做；**SSE streaming 已做并有测试**（`test_a07_sse_stream.py` 3/3，A-07）。
+- OIDC 真 IdP 已实现（`OidcVerifier` RS256/ES256 验签 + exp/nbf/iss/aud + kid 严格匹配，`test_eoidc_jwt.py` 8/8）；缺的只是接真实外部 IdP 的 JWKS URL 配置。
+- event_bridge v1/v2 保持 `experimental_test_only` 生产门禁。
 
 ## 证据等级
 

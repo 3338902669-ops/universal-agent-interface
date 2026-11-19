@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UAI 看板 · 预览（1440 / 390）</title>
+<link rel="stylesheet" href="panel.css">
+<style>
+  html, body { margin: 0; background: #020617; }
+  .frame { width: min(1440px, 100%); margin: 0 auto; }
+  .frame--narrow { width: 390px; margin: 24px auto; border-top: 1px solid #334155; padding-top: 24px; }
+  .label { font: 11px/1 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase;
+           color: #7C8AA6; padding: 8px 12px; background: #0E1223; }
+</style>
+</head>
+<body>
+  <div class="label">1440 × 定宽（桌面全宽）</div>
+  <div class="frame">
+    <div class="uai-panel">
+      <div class="uai-head">
+        <span class="uai-title">UAI 协作</span>
+        <span class="uai-badge">4 席</span>
+        <span class="uai-actions">
+          <button class="uai-btn uai-btn--primary" type="button">检测并搭建</button>
+          <button class="uai-btn" type="button">刷新</button>
+        </span>
+      </div>
+
+      <div class="uai-grid">
+        <div class="uai-cell">
+          <span class="uai-cell__k">中枢</span>
+          <span class="uai-cell__v"><i class="uai-dot uai-dot--on"></i>运行中<span class="uai-cell__u">pid 58084</span></span>
+          <span class="uai-cell__note">单例锁由活进程持有</span>
+        </div>
+        <div class="uai-cell">
+          <span class="uai-cell__k">席位</span>
+          <span class="uai-cell__v">4<span class="uai-cell__u">/ 4 持有</span></span>
+          <span class="uai-cell__note">dsh · tianshu · codex · xiaoyu</span>
+        </div>
+        <div class="uai-cell">
+          <span class="uai-cell__k">监督</span>
+          <span class="uai-cell__v">1<span class="uai-cell__u">个 uai serve</span></span>
+          <span class="uai-cell__note">看护任务每 2 分钟复查</span>
+        </div>
+      </div>
+
+      <div class="uai-section">
+        <div class="uai-section__h"><span>席位持有者</span><span>4 / 4</span></div>
+      <div class="uai-row">
+        <span class="uai-row__name">dsh</span>
+        <span class="uai-row__state"><i class="uai-dot uai-dot--on"></i>运行中</span>
+        <span class="uai-row__src">os_lock_held</span>
+        <span class="uai-row__meta">pid 53416</span>
+      </div>
+      <div class="uai-row">
+        <span class="uai-row__name">tianshu</span>
+        <span class="uai-row__state"><i class="uai-dot uai-dot--on"></i>运行中</span>
+        <span class="uai-row__src">os_lock_held</span>
+        <span class="uai-row__meta">pid 17532</span>
+      </div>
+      <div class="uai-row">
+        <span class="uai-row__name">codex</span>
+        <span class="uai-row__state"><i class="uai-dot uai-dot--on"></i>运行中</span>
+        <span class="uai-row__src">os_lock_held</span>
+        <span class="uai-row__meta">pid 6768</span>
+      </div>
+      <div class="uai-row">
+        <span class="uai-row__name">xiaoyu</span>
+        <span class="uai-row__state"><i class="uai-dot uai-dot--on"></i>运行中</span>
+        <span class="uai-row__src">os_lock_held</span>
+        <span class="uai-row__meta">pid 39180</span>
+      </div>
+      </div>
+
+      <div class="uai-section">
+        <div class="uai-section__h"><span>能力矩阵</span><span>就绪 5 / 12</span></div>
+        <div class="uai-cap">
+          <span class="uai-tag uai-tag--ready">dsh</span>
+          <span class="uai-tag uai-tag--ready">codex</span>
+          <span class="uai-tag uai-tag--ready">claude</span>
+          <span class="uai-tag uai-tag--ready">openclaw</span>
+          <span class="uai-tag uai-tag--ready">rivet</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame--narrow">
+    <div class="label" style="width:390px;margin:0 auto 0">390 × 移动（单列）</div>
+    <div class="uai-panel">
+      <div class="uai-head">
+        <span class="uai-title">UAI 协作</span>
+        <span class="uai-badge">4 席</span>
+        <span class="uai-actions">
+          <button class="uai-btn uai-btn--primary" type="button">检测并搭建</button>
+          <button class="uai-btn" type="button">刷新</button>
+        </span>
+      </div>
+      <div class="uai-grid">
+        <div class="uai-cell"><span class="uai-cell__k">中枢</span><span class="uai-cell__v"><i class="uai-dot uai-dot--on"></i>运行中</span></div>
+        <div class="uai-cell"><span class="uai-cell__k">席位</span><span class="uai-cell__v">4<span class="uai-cell__u">/ 4 持有</span></span></div>
+        <div class="uai-cell"><span class="uai-cell__k">监督</span><span class="uai-cell__v">1<span class="uai-cell__u">个 uai serve</span></span></div>
+      </div>
+      <div class="uai-section">
+        <div class="uai-section__h"><span>席位持有者</span><span>4 / 4</span></div>
+      <div class="uai-row">
+        <span class="uai-row__name">dsh</span>
+        <span class="uai-row__state"><i class="uai-dot uai-dot--on"></i>运行中</span>
+        <span class="uai-row__src">os_lock_held</span>
+        <span class="uai-row__meta">pid 53416</span>
+      </div>
+      <div class="uai-row">
+        <span class="uai-row__name">tianshu</span>
+        <span class="uai-row__state"><i class="uai-dot uai-dot--on"></i>运行中</span>
+        <span class="uai-row__src">os_lock_held</span>
+        <span class="uai-row__meta">pid 17532</span>
+      </div>
+      <div class="uai-row">
+        <span class="uai-row__name">codex</span>
+        <span class="uai-row__state"><i class="uai-dot uai-dot--on"></i>运行中</span>
+        <span class="uai-row__src">os_lock_held</span>
+        <span class="uai-row__meta">pid 6768</span>
+      </div>
+      <div class="uai-row">
+        <span class="uai-row__name">xiaoyu</span>
+        <span class="uai-row__state"><i class="uai-dot uai-dot--on"></i>运行中</span>
+        <span class="uai-row__src">os_lock_held</span>
+        <span class="uai-row__meta">pid 39180</span>
+      </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

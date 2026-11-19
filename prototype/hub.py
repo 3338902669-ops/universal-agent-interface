@@ -23,6 +23,7 @@ from nats.aio.msg import Msg
 
 from core import (
     CONTRACT_VERSION,
+    SUPPORTED_CONTRACT_VERSIONS,
     VALID_EVENT_KINDS,
     AppendOnlyJsonl,
     append_log,
@@ -47,6 +48,37 @@ def iso_after(seconds: float) -> str:
     return (
         datetime.now(timezone.utc) + timedelta(seconds=seconds)
     ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _load_memory_pipeline():
+    """按需加载 stage2 记忆管道（hub 不硬依赖它，缺了也要能跑）。"""
+    import sys as _sys
+
+    stage2 = Path(__file__).resolve().parent.parent / "stage2"
+    if str(stage2) not in _sys.path:
+        _sys.path.insert(0, str(stage2))
+    import memory_pipeline
+
+    return memory_pipeline
+
+
+def _memory_required(envelope: dict[str, Any]) -> bool:
+    contract = ((envelope or {}).get("params") or {}).get("task_contract") or {}
+    return bool(contract.get("memory_intent_required"))
+
+
+def _graph_writes_enabled() -> bool:
+    try:
+        import sys as _sys
+
+        stage2 = Path(__file__).resolve().parent.parent / "stage2"
+        if str(stage2) not in _sys.path:
+            _sys.path.insert(0, str(stage2))
+        from outcome_recorder import graph_writes_enabled
+
+        return graph_writes_enabled()
+    except Exception:
+        return False
 
 
 @dataclass
@@ -85,6 +117,8 @@ class Task:
     dispatch_attempts: int = 0
     terminal_reason: str | None = None
     blocked_interfaces: set[str] = field(default_factory=set)
+    # 席位在结果里声明的记忆意图（hub 代写进 outbox 的 intent_id）
+    memory_intents: list[str] = field(default_factory=list)
 
 
 class Hub:
@@ -92,8 +126,19 @@ class Hub:
         self.base = base
         self.nats_url = nats_url
         self.default_lease_seconds = lease_seconds
+        # UAI-08：裁定写回图谱的超时（秒）。图谱慢/挂不能拖住裁定。
+        self.graph_memory_timeout_s = float(os.environ.get("UAI_GRAPH_MEMORY_TIMEOUT", "3.0"))
+        # outbox 自愈周期：0 = 关闭（测试/离线场景）。落盘不丢，只是晚一点写进图。
+        self.memory_drain_s = float(os.environ.get("UAI_MEMORY_DRAIN_S", "60"))
+        # 持有后台记忆任务的强引用：否则 create_task 的返回值被 GC，任务可能被回收
+        self._memory_tasks: set[asyncio.Task[Any]] = set()
         self.ledger_path = base / "data" / "ledger.jsonl"
         self.ledger = AppendOnlyJsonl(self.ledger_path)
+        # 心跳是连接保活，不是审计凭证：单独落盘，不进哈希链主账本
+        self.heartbeat_path = base / "data" / "heartbeats.jsonl"
+        self.heartbeat_log = AppendOnlyJsonl(self.heartbeat_path)
+        from ledger_seal import LedgerSealer
+        self.sealer = LedgerSealer(self.ledger_path, base / "data" / "chain-heads.jsonl")
         self.connection_log = base / "logs" / "hub-connection.jsonl"
         self.token_hashes_path = base / "data" / "token-hashes.json"
         self.nc: NATS | None = None
@@ -104,12 +149,29 @@ class Hub:
         self.dispatch_scheduled = False
         self.events_paused_until = 0.0
         self.stop_event = asyncio.Event()
+        # 按 task_id 的账本索引：on_state 必须 O(1)。
+        # 之前每次查询扫两遍全账本，113k 行时要 1.3–6.4s；席位心跳是 2s 超时的
+        # request/response，中枢一慢就被判 INTERFACE_STALE，派发随之 delivery_failed。
+        self.state_index: dict[str, list[dict[str, Any]]] = {}
+        self.event_index: dict[str, list[dict[str, Any]]] = {}
         self._replay()
+
+    def _index_record(self, record: dict[str, Any]) -> None:
+        """把状态/事件按 task_id 归位，供 on_state 直接取用。"""
+        task_id = record.get("task_id")
+        if not task_id:
+            return
+        kind = record.get("record")
+        if kind == "TASK_STATE":
+            self.state_index.setdefault(str(task_id), []).append(record)
+        elif kind == "TASK_EVENT":
+            self.event_index.setdefault(str(task_id), []).append(record)
 
     def _replay(self) -> None:
         """Reconstruct append-only facts. Registration/auth is intentionally not restored."""
 
         for record in self.ledger.records():
+            self._index_record(record)
             kind = record.get("record")
             if kind == "TASK_ACCEPTED":
                 envelope = record["envelope"]
@@ -143,8 +205,17 @@ class Hub:
 
     def record(self, record_type: str, **fields: Any) -> dict[str, Any]:
         value = {"record": record_type, "ts": now_iso(), **fields}
-        self.ledger.append(value)
+        # 哈希链接线（2026-11-15）：写前 seal，篡改/删链可检出；历史未链化记录渐进兼容
+        sealed = self.sealer.seal(value)
+        self.ledger.append(sealed)
+        self._index_record(sealed)
         return value
+
+    def record_heartbeat(self, interface_id: str) -> None:
+        """心跳只写独立日志：不封链、不进主账本。
+        主账本要留的是状态变更（注册/失联/裁定）与业务事实。
+        """
+        self.heartbeat_log.append({"ts": now_iso(), "interface_id": interface_id})
 
     def load_token_hashes(self) -> dict[str, str]:
         if not self.token_hashes_path.exists():
@@ -225,6 +296,8 @@ class Hub:
             server=getattr(self.nc, "connected_url", None),
         )
         self.record("HUB_START", contract_version=CONTRACT_VERSION, pid=os.getpid())
+        if self.memory_drain_s > 0:
+            asyncio.create_task(self._memory_drain_loop())
 
     @staticmethod
     def _decode(msg: Msg) -> dict[str, Any] | None:
@@ -264,7 +337,7 @@ class Hub:
             control_subject = str(card["transport"]["control_subject"])
             if card["interface_id"] != interface_id:
                 raise ValueError("interface_id mismatch")
-            if card["contract_version"] != CONTRACT_VERSION:
+            if card["contract_version"] not in SUPPORTED_CONTRACT_VERSIONS:
                 raise ValueError("contract version mismatch")
             capabilities = card["capabilities"]
             if not isinstance(capabilities, list) or not capabilities:
@@ -435,16 +508,24 @@ class Hub:
         request = self._decode(msg)
         interface_id = str((request or {}).get("interface_id", ""))
         session = self.sessions.get(interface_id)
-        if (
-            not request
-            or not session
-            or not session.token
-            or not verify_proof(session.token, request)
-        ):
+        if not request:
+            self.json_response(msg, {"ok": False, "reason": "malformed"})
+            return
+        if not session:
+            # 中枢重启后席位还在跑：它们的内存里 registered 仍是 True。
+            # 只回 unauthorized 的话席位不会动作（实测 80s 都不回来），必须明确
+            # 让它重新注册——这是"中枢单独重启后完全没有可用席位"的根因。
+            # 这里不写账本：未知席位每 2s 一次心跳会淹掉账本。
+            self.json_response(
+                msg,
+                {"ok": False, "reason": "unknown_session", "must_register": True},
+            )
+            return
+        if not session.token or not verify_proof(session.token, request):
             self.json_response(msg, {"ok": False, "reason": "unauthorized"})
             return
         session.last_heartbeat = time.monotonic()
-        self.record("INTERFACE_HEARTBEAT", interface_id=interface_id)
+        self.record_heartbeat(interface_id)
         if session.stale or not session.active:
             self.json_response(
                 msg,
@@ -541,7 +622,34 @@ class Hub:
     def schedule_dispatch(self) -> None:
         if not self.dispatch_scheduled:
             self.dispatch_scheduled = True
-            asyncio.create_task(self._dispatch_round())
+            # 关键：create_task 的异常默认没人收（只在 GC 时打一行 warn）。
+            # 一旦 _dispatch_round 抛异常或抛在 dispatch_lock 上，dispatch_scheduled
+            # 会永远停在 True → 之后**再也不会派发**，而进程/锁/心跳全都健康。
+            # 这就是 2026-11-18 实测到的「hub 假在线、任务永远 QUEUED」。
+            scheduled = asyncio.create_task(self._dispatch_round())
+            scheduled.add_done_callback(self._on_dispatch_done)
+
+    def _on_dispatch_done(self, finished: asyncio.Task[Any]) -> None:
+        # 无条件复位：这条标志位是派发循环的“心跳”，卡住就等于中枢瘫痪
+        self.dispatch_scheduled = False
+        if finished.cancelled():
+            return
+        error = finished.exception()
+        if error is None:
+            return
+        try:
+            self.record(
+                "DISPATCH_LOOP_ERROR",
+                error=repr(error)[:300],
+                note="派发循环异常，已复位并重排",
+            )
+        except Exception:
+            pass
+        # 自愈：下一个事件循环轮次重排一次（有 QUEUED 才会真干活）
+        try:
+            asyncio.get_running_loop().call_later(1.0, self.schedule_dispatch)
+        except RuntimeError:
+            pass
 
     async def _dispatch_round(self) -> None:
         async with self.dispatch_lock:
@@ -1075,6 +1183,8 @@ class Hub:
                 event_seq=seq,
                 result_pointer=pointer,
             )
+            # A：席位跑在只读沙箱里，写不了共享 outbox；中枢读它的结果代写
+            self._capture_seat_memory(task, pointer, interface_id)
             self.schedule_dispatch()
         elif kind == "completed":
             if task.state != "SUCCEEDED":
@@ -1133,6 +1243,85 @@ class Hub:
             reason=reason,
             **extra,
         )
+
+    def _run_three_layer(
+        self, task: "Task", request: dict[str, Any]
+    ) -> dict[str, Any]:
+        """三层验收（I-4）：从任务信封的 output_contract 与实际产物执行验证。
+
+        返回 {"enforced": bool, "result": dict|None, "reject": str|None}
+        - enforced: 信封里是否带 output_contract（带则失败即拒绝裁定）
+        - reject:   非空表示应拒绝本次裁定，值为拒绝原因
+        """
+        params = (task.envelope or {}).get("params") or {}
+        contract = params.get("output_contract") or {}
+        enforce_flag = bool(request.get("enforce_three_layer"))
+        enforced = bool(contract) or enforce_flag
+        if not contract and not enforce_flag:
+            return {"enforced": False, "result": None, "reject": None}
+
+        import sys as _sys
+
+        stage2 = Path(__file__).resolve().parent.parent / "stage2"
+        if str(stage2) not in _sys.path:
+            _sys.path.insert(0, str(stage2))
+        try:
+            from three_layer_verdict import ThreeLayerVerdict
+        except Exception as exc:  # 模块不可用时不阻断旧路径
+            return {"enforced": False, "result": None,
+                    "reject": None, "load_error": "three_layer_unavailable:%s" % exc}
+
+        # 读取实际产物
+        output: dict[str, Any] = {}
+        pointer = task.result_pointer or {}
+        load_error = None
+        if pointer:
+            try:
+                path = file_uri_to_path(pointer.get("uri", ""))
+                raw = path.read_bytes()
+                if "json" in str(pointer.get("media_type", "")):
+                    try:
+                        parsed = json.loads(raw.decode("utf-8", errors="replace"))
+                        output = parsed if isinstance(parsed, dict) else {"value": parsed}
+                    except Exception:
+                        output = {"text": raw.decode("utf-8", errors="replace")}
+                else:
+                    output = {"text": raw.decode("utf-8", errors="replace")}
+            except Exception as exc:
+                load_error = "result_unreadable:%s" % exc
+
+        verdict_word = request.get("verdict", "")
+        checker = request.get("checker") or "unknown"
+        implementer = task.selected_interface or "unknown"
+
+        v = ThreeLayerVerdict({"output_contract": contract})
+        try:
+            result = v.execute_all(
+                output,
+                {},
+                request.get("run_outputs") or [],
+                verdict_word,
+                checker,
+                implementer,
+            )
+        except Exception as exc:
+            return {"enforced": enforced, "result": None,
+                    "reject": "three_layer_error:%s" % exc}
+
+        if load_error:
+            result["load_error"] = load_error
+
+        reject = None
+        if enforced:
+            if not result["layer1"]["pass"]:
+                reject = "layer1_deterministic_failed"
+            elif result["layer2"].get("pass") is False:
+                reject = "layer2_consistency_below_threshold"
+            elif not result["layer3"]["pass"]:
+                reject = ("verifier_is_implementer"
+                          if not result["layer3"]["independent"]
+                          else "verdict_not_canonical")
+        return {"enforced": enforced, "result": result, "reject": reject}
 
     def _validate_pointer(
         self, pointer: Any
@@ -1198,6 +1387,8 @@ class Hub:
                 reason_code=reason_code,
                 envelope=task.envelope,
             )
+        # 失败/超时/取消也要进团队记忆，否则「卡死」永远无法被检索
+        self._spawn_terminal_memory(task, state, reason_code)
         self.schedule_dispatch()
 
     async def on_state(self, msg: Msg) -> None:
@@ -1213,18 +1404,8 @@ class Hub:
                 "ok": True,
                 "task_id": task_id,
                 "state": task.state,
-                "state_history": [
-                    row
-                    for row in self.ledger.records()
-                    if row.get("record") == "TASK_STATE"
-                    and row.get("task_id") == task_id
-                ],
-                "events": [
-                    row
-                    for row in self.ledger.records()
-                    if row.get("record") == "TASK_EVENT"
-                    and row.get("task_id") == task_id
-                ],
+                "state_history": list(self.state_index.get(task_id, ())),
+                "events": list(self.event_index.get(task_id, ())),
                 "event_seq": task.event_seq,
                 "fencing_generation": task.fencing_generation,
                 "result_pointer": task.result_pointer,
@@ -1254,6 +1435,27 @@ class Hub:
                 },
             )
             return
+        # 未到终态的任务不得判「通过」：没有产出就宣布成功是伪证。
+        # 允许「不通过 / 作废 / 未核」——那是记录问题，不是宣布完成。
+        if task.state not in TERMINAL_STATES and verdict in ("通过", "带注通过"):
+            self.record(
+                "VERDICT_REJECTED",
+                task_id=task_id,
+                reason="task_not_terminal",
+                checker=request.get("checker", "unknown"),
+                execution_state=task.state,
+            )
+            self.json_response(
+                msg,
+                {
+                    "ok": False,
+                    "reason": "task_not_terminal",
+                    "execution_state": task.state,
+                    "allowed_verdicts": ["不通过", "未核", "作废"],
+                },
+            )
+            return
+
         if verdict == "未核":
             missing = [
                 key
@@ -1270,10 +1472,49 @@ class Hub:
                     },
                 )
                 return
+        # C：契约声明必须留记忆，却一条都没捕获到 → 打回，不允许静默通过
+        if _memory_required(task.envelope) and not task.memory_intents:
+            self.record(
+                "VERDICT_REJECTED",
+                task_id=task_id,
+                reason="memory_intent_missing",
+                checker=request.get("checker", "unknown"),
+            )
+            self.json_response(
+                msg,
+                {"ok": False, "reason": "memory_intent_missing",
+                 "hint": "任务契约要求席位在结果里输出 [[MEMORY_INTENT]]...[[/MEMORY_INTENT]]"},
+            )
+            return
+        # I-4: 三层验收（信封带 output_contract 时强制，否则仅记录建议值）
+        if task.state in TERMINAL_STATES:
+            three_layer = self._run_three_layer(task, request)
+            if three_layer.get("reject"):
+                self.record(
+                    "VERDICT_REJECTED",
+                    task_id=task_id,
+                    reason=three_layer["reject"],
+                    checker=request.get("checker", "unknown"),
+                    three_layer=three_layer.get("result"),
+                )
+                self.json_response(
+                    msg,
+                    {
+                        "ok": False,
+                        "reason": three_layer["reject"],
+                        "three_layer": three_layer.get("result"),
+                    },
+                )
+                return
+        else:
+            three_layer = {"enforced": False, "result": None, "reject": None}
+
         record = self.record(
             "VERDICT",
             task_id=task_id,
             verdict=verdict,
+            three_layer=three_layer.get("result"),
+            three_layer_enforced=three_layer.get("enforced", False),
             checker=request.get("checker", "unknown"),
             evidence_level=request.get("evidence_level", "E3"),
             deterministic_check=request.get("deterministic_check"),
@@ -1286,7 +1527,227 @@ class Hub:
             execution_state=task.state,
         )
         task.verdict = record
-        self.json_response(msg, {"ok": True, "verdict_record": record})
+        graph_memory = await self._record_graph_outcome(task, verdict)
+        self.json_response(
+            msg,
+            {
+                "ok": True,
+                "verdict_record": record,
+                "graph_memory": graph_memory,
+            },
+        )
+
+    def _capture_seat_memory(
+        self, task: "Task", pointer: dict[str, Any], interface_id: str
+    ) -> None:
+        """把席位结果里的 [[MEMORY_INTENT]] 块代写进 outbox。
+
+        席位是只读沙箱，不能直接写共享库；所以记忆只能由中枢代写。
+        解析失败或校验不过都留痕，不静默。
+        """
+        if not _graph_writes_enabled():
+            return
+        try:
+            import sys as _sys
+
+            stage2 = Path(__file__).resolve().parent.parent / "stage2"
+            if str(stage2) not in _sys.path:
+                _sys.path.insert(0, str(stage2))
+            import memory_bridge as bridge
+        except Exception as exc:
+            self.record("MEMORY_CAPTURE_FAILED", task_id=task.task_id,
+                        reason="bridge_unavailable:%s" % str(exc)[:100])
+            return
+        try:
+            result = bridge.capture_from_pointer(
+                pointer or {}, task_id=task.task_id,
+                agent=task.selected_interface or interface_id or "unknown",
+            )
+        except Exception as exc:
+            self.record("MEMORY_CAPTURE_FAILED", task_id=task.task_id,
+                        reason="capture_error:%s" % str(exc)[:120])
+            return
+
+        captured = list(result.get("captured") or [])
+        rejected = list(result.get("rejected") or [])
+        if captured:
+            task.memory_intents.extend(captured)
+            self.record("MEMORY_CAPTURED", task_id=task.task_id,
+                        interface_id=task.selected_interface or interface_id,
+                        intents=captured)
+            self._spawn_memory_drain()
+        if rejected:
+            self.record("MEMORY_REJECTED", task_id=task.task_id,
+                        interface_id=task.selected_interface or interface_id,
+                        rejected=rejected[:5])
+
+    async def _record_graph_outcome(self, task: "Task", verdict: str) -> dict[str, Any]:
+        """UAI 记忆管道：裁定 → outbox → 图谱。
+
+        与旧实现的区别：**先持久化入队，再尝试投递**。图谱慢/挂不阻塞裁定，
+        没写成的记忆留在 outbox 里等重试，而不是只剩一条 MEMORY_OUTCOME 就永久丢失。
+        """
+        if not _graph_writes_enabled():
+            return {"written": False, "reason": "disabled_by_env"}
+        try:
+            pipeline = _load_memory_pipeline()
+        except Exception as exc:
+            return {"written": False, "reason": "pipeline_unavailable:%s" % str(exc)[:100]}
+
+        envelope = task.envelope or {}
+        # 只入队不投递：裁定不能被图谱 I/O 拖住（Graphiti 冷启动实测 4.8s）。
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    pipeline.record_verdict,
+                    task_id=task.task_id,
+                    verdict=verdict,
+                    agent_id=task.selected_interface or "unknown",
+                    description=envelope.get("instruction") or "",
+                    flush=False,
+                ),
+                timeout=self.graph_memory_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            result = {"written": False, "reason": "enqueue_timeout"}
+        except Exception as exc:
+            result = {"written": False, "reason": "error:%s" % str(exc)[:100]}
+        else:
+            self._spawn_memory_drain()
+
+        deferred = (
+            result.get("status") == "pending"
+            or result.get("reason") == "deferred"
+            or bool(result.get("enqueued"))
+            # 同一 task+verdict 重复提交是正常的客户端重试，不是记忆写丢
+            or bool(result.get("duplicate"))
+            or result.get("reason") == "duplicate_intent_id"
+        )
+        if not result.get("written") and not deferred:
+            # 只有「真的没入队」才算记忆写丢；入队成功但还没投递不是失败，
+            # 否则每条正常裁定都会写一条 MEMORY_OUTCOME，把真故障淹掉。
+            self.record(
+                "MEMORY_OUTCOME",
+                task_id=task.task_id,
+                verdict=verdict,
+                reason=result.get("reason"),
+                key=result.get("key"),
+                intent_id=result.get("intent_id"),
+            )
+        return result
+
+    # ---------- 团队记忆：终态事件自动入图 ----------
+
+    def _spawn_memory_drain(self) -> None:
+        """马上补一次投递，不等 60s 周期。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._drain_memory_once())
+        self._memory_tasks.add(task)
+        task.add_done_callback(self._memory_tasks.discard)
+
+    def _spawn_terminal_memory(self, task: "Task", state: str, reason_code: str) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        spawned = loop.create_task(
+            self._record_terminal_memory(task, state, reason_code)
+        )
+        self._memory_tasks.add(spawned)
+
+        def _done(finished: asyncio.Task[Any]) -> None:
+            self._memory_tasks.discard(finished)
+            if finished.cancelled():
+                return
+            exc = finished.exception()
+            if exc is not None:
+                # 后台任务异常不能静默：账本留痕，否则「记忆写丢」永远查不到
+                self.record(
+                    "MEMORY_OUTCOME",
+                    task_id=task.task_id,
+                    state=state,
+                    reason="background_error:%s" % str(exc)[:120],
+                )
+
+        spawned.add_done_callback(_done)
+
+    async def _record_terminal_memory(
+        self, task: "Task", state: str, reason_code: str
+    ) -> None:
+        """失败/超时/取消也要留下可检索的记忆；永远不阻塞中枢。"""
+        if not _graph_writes_enabled():
+            return
+        try:
+            pipeline = _load_memory_pipeline()
+        except Exception:
+            return
+        envelope = task.envelope or {}
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    pipeline.record_terminal,
+                    task_id=task.task_id,
+                    state=state,
+                    agent_id=task.selected_interface or "unknown",
+                    description=envelope.get("instruction") or "",
+                    reason=reason_code,
+                ),
+                timeout=self.graph_memory_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            self.record(
+                "MEMORY_OUTCOME",
+                task_id=task.task_id,
+                state=state,
+                reason="timeout_queued",
+            )
+            return
+        except Exception as exc:
+            self.record(
+                "MEMORY_OUTCOME",
+                task_id=task.task_id,
+                state=state,
+                reason="error:%s" % str(exc)[:120],
+            )
+            return
+        if not result.get("written"):
+            self.record(
+                "MEMORY_OUTCOME",
+                task_id=task.task_id,
+                state=state,
+                reason=result.get("reason"),
+                intent_id=result.get("intent_id"),
+            )
+
+    async def _drain_memory_once(self) -> dict[str, Any]:
+        if not _graph_writes_enabled():
+            return {"skipped": "disabled_by_env"}
+        try:
+            from memory_outbox import MemoryOutbox
+            from memory_writer import drain
+        except Exception as exc:
+            return {"error": "import_failed:%s" % str(exc)[:80]}
+        try:
+            outbox = MemoryOutbox(None)
+            return await asyncio.to_thread(drain, outbox, limit=20)
+        except Exception as exc:
+            return {"error": str(exc)[:120]}
+
+    async def _memory_drain_loop(self) -> None:
+        """outbox 里没写成的记忆靠它自愈，不需要人记得手动 flush。"""
+        while not self.stop_event.is_set():
+            try:
+                await asyncio.sleep(self.memory_drain_s)
+                if self.stop_event.is_set():
+                    return
+                await self._drain_memory_once()
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                continue
 
     async def on_debug(self, msg: Msg) -> None:
         request = self._decode(msg)
@@ -1340,32 +1801,91 @@ class Hub:
         self.json_response(msg, {"ok": False, "reason": "unknown_debug_action"})
 
     async def on_reconcile(self, msg: Msg) -> None:
+        # 性能与正确性修复（2026-11-18）：原实现是「每个 task 扫一遍全账本」，
+        # 复杂度 O(tasks x ledger)。账本 5500+ 行时单次调用会把 hub 的事件循环
+        # **整段堵死**，于是 reconcile 超时的同时 submit/claim 也全部超时 ——
+        # 进程、锁、心跳全绿，中枢实际已瘫痪（今天「假在线」的真正主因）。
+        # 现在改成一次遍历建索引，再逐 task 比对。
+        seq_by_task: dict[str, set[int]] = {}
+        for row in self.ledger.records():
+            if row.get("record") != "TASK_EVENT":
+                continue
+            task_id = row.get("task_id")
+            if task_id is None:
+                continue
+            try:
+                seq = int(row["seq"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            seq_by_task.setdefault(str(task_id), set()).add(seq)
+
         gaps: list[dict[str, Any]] = []
         for task in self.tasks.values():
-            seqs = sorted(
-                {
-                    int(row["seq"])
-                    for row in self.ledger.records()
-                    if row.get("record") == "TASK_EVENT"
-                    and row.get("task_id") == task.task_id
-                }
-            )
+            seqs = seq_by_task.get(task.task_id)
             if not seqs:
                 continue
-            expected = list(range(1, max(seqs) + 1))
-            missing = sorted(set(expected) - set(seqs))
-            if missing:
-                gaps.append({"task_id": task.task_id, "missing": missing})
+            highest = max(seqs)
+            # 不物化完整缺失列表：seq 异常大时 range(1, highest+1) 会长时间占用事件循环。
+            # 只在必要范围内扫描并提前截断（codex 审代码第 3 条）。
+            scan_ceiling = min(highest, 10000)
+            missing: list[int] = []
+            missing_count = 0
+            for seq in range(1, scan_ceiling + 1):
+                if seq in seqs:
+                    continue
+                missing_count += 1
+                if len(missing) < 50:
+                    missing.append(seq)
+            truncated = highest > scan_ceiling
+            if missing_count or truncated:
+                # 不把未扫描的序号算成缺失（那会高估），单独用 truncated/unscanned 标注
+                gaps.append({"task_id": task.task_id, "missing": missing,
+                             "missing_count": missing_count,
+                             "scanned_to": scan_ceiling,
+                             "truncated": truncated,
+                             "unscanned": max(0, highest - scan_ceiling)})
         self.record(
             "RECONCILIATION",
             gap_count=len(gaps),
-            gaps=gaps,
+            gaps=gaps[:50],
             frequency_s=300,
         )
-        self.json_response(msg, {"ok": True, "gap_count": len(gaps), "gaps": gaps})
+        self.json_response(msg, {"ok": True, "gap_count": len(gaps), "gaps": gaps[:50]})
 
+        # 保证上面这段不会在异常时静默吞掉
     async def run(self) -> None:
         await self.connect()
+
+        # A-09：持锁期间周期性续期。TTL 只用于告警（stale/wedged），不再用于夺权，
+        # 所以这里只需要让 status() 别误报；真裁决在 OS 锁上。
+        guard = getattr(self, "_guard", None)
+        heartbeat_task: asyncio.Task[Any] | None = None
+        if guard is not None:
+            async def _singleton_beat() -> None:
+                while True:
+                    await asyncio.sleep(max(5.0, float(guard.ttl_s) / 3.0))
+                    try:
+                        guard.heartbeat()
+                    except Exception:
+                        return
+
+            heartbeat_task = asyncio.create_task(_singleton_beat())
+        async def _dispatch_watchdog() -> None:
+            """派发看护：有 QUEUED 却没在派发，就补一次 schedule_dispatch。
+
+            这是对 dispatch_scheduled 卡死的第二道保险：即便标志位被意外置 True，
+            看护也能发现「有活却没派」并把它救回来。"""
+            while True:
+                await asyncio.sleep(5.0)
+                try:
+                    pending = any(t.state == "QUEUED" for t in self.tasks.values())
+                    if pending and not self.dispatch_scheduled:
+                        self.schedule_dispatch()
+                except Exception:
+                    pass
+
+        dispatch_task = asyncio.create_task(_dispatch_watchdog())
+
         loop = asyncio.get_running_loop()
         for signal_name in (signal.SIGINT, signal.SIGTERM):
             with contextlib.suppress(NotImplementedError):
@@ -1385,6 +1905,11 @@ class Hub:
             flush=True,
         )
         await self.stop_event.wait()
+        dispatch_task.cancel()
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await heartbeat_task
         if self.nc:
             await self.nc.drain()
 
@@ -1404,13 +1929,58 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+EXIT_ALREADY_RUNNING = 3
+
+
+def _acquire_hub_singleton(base: Path):
+    """A-09：同一个 base 只允许一个中枢持有写权。"""
+    import sys as _sys
+
+    stage2 = Path(__file__).resolve().parent.parent / "stage2"
+    if str(stage2) not in _sys.path:
+        _sys.path.insert(0, str(stage2))
+    try:
+        from hub_singleton import HubSingleton
+    except Exception as exc:
+        return None, {"reason": "singleton_unavailable:%s" % str(exc)[:100]}
+
+    guard = HubSingleton(
+        base / "data" / "hub.lock",
+        namespace="uai-hub",
+        ttl_s=float(os.environ.get("UAI_HUB_SINGLETON_TTL", "600")),
+    )
+    ok, info = guard.acquire()
+    return (guard, info) if ok else (None, info)
+
+
 def main() -> int:
     args = parse_args()
-    hub = Hub(args.base.resolve(), args.nats_url, args.lease_seconds)
+    base = args.base.resolve()
+    guard, info = _acquire_hub_singleton(base)
+    if guard is None:
+        # 第二个中枢**不许**降级成只读继续订阅：那会双派、双写账本。
+        # 2026-11-17 实测过：两个中枢各写一份 TASK_ACCEPTED / VERDICT。
+        print(
+            json.dumps(
+                {
+                    "event": "hub_singleton_denied",
+                    "reason": info.get("reason"),
+                    "holder": info.get("holder"),
+                    "pid": os.getpid(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return EXIT_ALREADY_RUNNING
+    hub = Hub(base, args.nats_url, args.lease_seconds)
+    hub._guard = guard  # run() 里续期，退出时释放
     try:
         asyncio.run(hub.run())
     except KeyboardInterrupt:
         return 130
+    finally:
+        guard.release()
     return 0
 
 

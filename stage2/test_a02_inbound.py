@@ -51,11 +51,11 @@ def states_of(task_id: str) -> list[str]:
 async def main() -> int:
     req = {"message": {"messageId": "a02-msg-0001",
                        "parts": [{"text": "只读检查：请回一个 OK"}]}}
-    # 实验室原型实现的是契约 v0.2；用 v1 会被中枢以 unsupported_contract_version 拒绝
+    # hub 已原生支持 1.0（v0.2→v1 迁移 2026-11-14）；版本协商改用假版本 9.9 验证拒绝路径
     try:
         await inbound_bridge.submit(nats_url=NATS_URL, request=req, created_by="a02-test",
                                     target_interface="dsh", timeout_s=60,
-                                    contract_version="1.0")
+                                    contract_version="9.9")
     except Exception as e:
         check("A-05 版本不匹配被中枢明确拒绝（不静默降级）",
               "unsupported_contract_version" in str(e), str(e)[:60])
@@ -64,9 +64,17 @@ async def main() -> int:
 
     out = await inbound_bridge.submit(
         nats_url=NATS_URL, request=req, created_by="a02-test",
-        target_interface="dsh", timeout_s=60, contract_version="0.2",
+        target_interface="dsh", timeout_s=60, contract_version="1.0",
     )
     task_id = out["task_id"]
+    # v0.2 兼容路径：裁剪版信封也能被同一中枢受理（回归门）
+    out02 = await inbound_bridge.submit(
+        nats_url=NATS_URL,
+        request={"message": {"messageId": "a02-msg-0002-legacy", "parts": [{"text": "v0.2 兼容路径探测"}]}},
+        created_by="a02-test", target_interface="dsh", timeout_s=60, contract_version="0.2",
+    )
+    check("A-02b v0.2 兼容路径仍受理", out02["accepted"] is True,
+          json.dumps(out02["hub_response"], ensure_ascii=False)[:80])
     check("A-02 中枢受理", out["accepted"] is True, json.dumps(out["hub_response"], ensure_ascii=False)[:80])
     check("A-02 返回 task_id", bool(task_id), task_id)
     check("A-02 信封 11 必填齐全",
