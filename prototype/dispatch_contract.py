@@ -47,6 +47,10 @@ def validate_task_contract(envelope: dict[str, Any]) -> str | None:
     if any(not isinstance(item, str) or not item.strip() or "\n" in item or "\r" in item for item in forbidden):
         return "invalid_task_contract:invalid_forbidden_action"
 
+    memory_required = contract.get("memory_intent_required")
+    if memory_required is not None and not isinstance(memory_required, bool):
+        return "invalid_task_contract:invalid_memory_intent_required"
+
     response_format = contract.get("response_format")
     if not isinstance(response_format, str) or not response_format.strip() or "\n" in response_format or "\r" in response_format:
         return "invalid_task_contract:invalid_response_format"

@@ -62,6 +62,11 @@ def _load_memory_pipeline():
     return memory_pipeline
 
 
+def _memory_required(envelope: dict[str, Any]) -> bool:
+    contract = ((envelope or {}).get("params") or {}).get("task_contract") or {}
+    return bool(contract.get("memory_intent_required"))
+
+
 def _graph_writes_enabled() -> bool:
     try:
         import sys as _sys
@@ -112,6 +117,8 @@ class Task:
     dispatch_attempts: int = 0
     terminal_reason: str | None = None
     blocked_interfaces: set[str] = field(default_factory=set)
+    # 席位在结果里声明的记忆意图（hub 代写进 outbox 的 intent_id）
+    memory_intents: list[str] = field(default_factory=list)
 
 
 class Hub:
@@ -142,12 +149,29 @@ class Hub:
         self.dispatch_scheduled = False
         self.events_paused_until = 0.0
         self.stop_event = asyncio.Event()
+        # 按 task_id 的账本索引：on_state 必须 O(1)。
+        # 之前每次查询扫两遍全账本，113k 行时要 1.3–6.4s；席位心跳是 2s 超时的
+        # request/response，中枢一慢就被判 INTERFACE_STALE，派发随之 delivery_failed。
+        self.state_index: dict[str, list[dict[str, Any]]] = {}
+        self.event_index: dict[str, list[dict[str, Any]]] = {}
         self._replay()
+
+    def _index_record(self, record: dict[str, Any]) -> None:
+        """把状态/事件按 task_id 归位，供 on_state 直接取用。"""
+        task_id = record.get("task_id")
+        if not task_id:
+            return
+        kind = record.get("record")
+        if kind == "TASK_STATE":
+            self.state_index.setdefault(str(task_id), []).append(record)
+        elif kind == "TASK_EVENT":
+            self.event_index.setdefault(str(task_id), []).append(record)
 
     def _replay(self) -> None:
         """Reconstruct append-only facts. Registration/auth is intentionally not restored."""
 
         for record in self.ledger.records():
+            self._index_record(record)
             kind = record.get("record")
             if kind == "TASK_ACCEPTED":
                 envelope = record["envelope"]
@@ -182,7 +206,9 @@ class Hub:
     def record(self, record_type: str, **fields: Any) -> dict[str, Any]:
         value = {"record": record_type, "ts": now_iso(), **fields}
         # 哈希链接线（2026-11-15）：写前 seal，篡改/删链可检出；历史未链化记录渐进兼容
-        self.ledger.append(self.sealer.seal(value))
+        sealed = self.sealer.seal(value)
+        self.ledger.append(sealed)
+        self._index_record(sealed)
         return value
 
     def record_heartbeat(self, interface_id: str) -> None:
@@ -1157,6 +1183,8 @@ class Hub:
                 event_seq=seq,
                 result_pointer=pointer,
             )
+            # A：席位跑在只读沙箱里，写不了共享 outbox；中枢读它的结果代写
+            self._capture_seat_memory(task, pointer, interface_id)
             self.schedule_dispatch()
         elif kind == "completed":
             if task.state != "SUCCEEDED":
@@ -1376,18 +1404,8 @@ class Hub:
                 "ok": True,
                 "task_id": task_id,
                 "state": task.state,
-                "state_history": [
-                    row
-                    for row in self.ledger.records()
-                    if row.get("record") == "TASK_STATE"
-                    and row.get("task_id") == task_id
-                ],
-                "events": [
-                    row
-                    for row in self.ledger.records()
-                    if row.get("record") == "TASK_EVENT"
-                    and row.get("task_id") == task_id
-                ],
+                "state_history": list(self.state_index.get(task_id, ())),
+                "events": list(self.event_index.get(task_id, ())),
                 "event_seq": task.event_seq,
                 "fencing_generation": task.fencing_generation,
                 "result_pointer": task.result_pointer,
@@ -1454,6 +1472,20 @@ class Hub:
                     },
                 )
                 return
+        # C：契约声明必须留记忆，却一条都没捕获到 → 打回，不允许静默通过
+        if _memory_required(task.envelope) and not task.memory_intents:
+            self.record(
+                "VERDICT_REJECTED",
+                task_id=task_id,
+                reason="memory_intent_missing",
+                checker=request.get("checker", "unknown"),
+            )
+            self.json_response(
+                msg,
+                {"ok": False, "reason": "memory_intent_missing",
+                 "hint": "任务契约要求席位在结果里输出 [[MEMORY_INTENT]]...[[/MEMORY_INTENT]]"},
+            )
+            return
         # I-4: 三层验收（信封带 output_contract 时强制，否则仅记录建议值）
         if task.state in TERMINAL_STATES:
             three_layer = self._run_three_layer(task, request)
@@ -1504,6 +1536,50 @@ class Hub:
                 "graph_memory": graph_memory,
             },
         )
+
+    def _capture_seat_memory(
+        self, task: "Task", pointer: dict[str, Any], interface_id: str
+    ) -> None:
+        """把席位结果里的 [[MEMORY_INTENT]] 块代写进 outbox。
+
+        席位是只读沙箱，不能直接写共享库；所以记忆只能由中枢代写。
+        解析失败或校验不过都留痕，不静默。
+        """
+        if not _graph_writes_enabled():
+            return
+        try:
+            import sys as _sys
+
+            stage2 = Path(__file__).resolve().parent.parent / "stage2"
+            if str(stage2) not in _sys.path:
+                _sys.path.insert(0, str(stage2))
+            import memory_bridge as bridge
+        except Exception as exc:
+            self.record("MEMORY_CAPTURE_FAILED", task_id=task.task_id,
+                        reason="bridge_unavailable:%s" % str(exc)[:100])
+            return
+        try:
+            result = bridge.capture_from_pointer(
+                pointer or {}, task_id=task.task_id,
+                agent=task.selected_interface or interface_id or "unknown",
+            )
+        except Exception as exc:
+            self.record("MEMORY_CAPTURE_FAILED", task_id=task.task_id,
+                        reason="capture_error:%s" % str(exc)[:120])
+            return
+
+        captured = list(result.get("captured") or [])
+        rejected = list(result.get("rejected") or [])
+        if captured:
+            task.memory_intents.extend(captured)
+            self.record("MEMORY_CAPTURED", task_id=task.task_id,
+                        interface_id=task.selected_interface or interface_id,
+                        intents=captured)
+            self._spawn_memory_drain()
+        if rejected:
+            self.record("MEMORY_REJECTED", task_id=task.task_id,
+                        interface_id=task.selected_interface or interface_id,
+                        rejected=rejected[:5])
 
     async def _record_graph_outcome(self, task: "Task", verdict: str) -> dict[str, Any]:
         """UAI 记忆管道：裁定 → outbox → 图谱。

@@ -8,6 +8,7 @@ inflight 超时可回收。它不关心图谱长什么样，只负责把 intent 
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -46,6 +47,10 @@ CREATE INDEX IF NOT EXISTS idx_intents_task ON intents(task_id);
 
 
 def default_db_path() -> Path:
+    # 允许测试/多环境指向独立库：否则测试会往生产 outbox 里写垃圾
+    override = os.environ.get("UAI_MEMORY_DB")
+    if override:
+        return Path(override)
     return Path.home() / ".shared" / "graph-memory" / "outbox.db"
 
 

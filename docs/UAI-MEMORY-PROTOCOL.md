@@ -50,6 +50,18 @@ uai-memory replay --intent-id <id>
 | 两条都不可用 | 留在 outbox 重试（1/2/4/8/16s），5 次后进死信 |
 | 内容像凭据 | 入队即拒收；出队再扫一次，绝不写出 |
 
+## 席位写入的真实机制（2026-11-20 补）
+
+席位跑在只读沙箱里，不能写共享 outbox。所以记忆不是席位写进去的，是中枢代写的。
+
+席位要做的只有一件事：在结果正文里输出记忆块（双方括号 MEMORY_INTENT，见 stage2/memory_bridge.py）。
+
+- 中枢在任务 result_ready 时解析并代写，source_agent 记为席位；
+- 解析失败或校验不过 → 账本 MEMORY_REJECTED，不静默；
+- 任务契约写了 memory_intent_required: true 却没给块 → 裁定被打回 memory_intent_missing。
+
+读取侧不需要席位自觉：派单时会自动注入【团队记忆·自动注入】...【注入结束】。
+
 ## 证据等级（沿用全队口径）
 
 - **E1**：命令输出、退出码、hash、URL 响应；

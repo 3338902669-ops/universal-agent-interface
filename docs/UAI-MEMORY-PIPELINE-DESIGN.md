@@ -177,6 +177,63 @@ nodes_after_upgrade → [{'deg': None, 'g': 'team'}]   # stub 已删除，只剩
 
 - **多进程并发写同一 intent**：查重与写入之间的窗口在跨进程下仍存在，真正解需要图侧唯一约束或确定性 uuid。当前架构下写者只有 hub 单进程 + 人工 CLI，实际风险低。
 
+
+## 16. 席位记忆：中枢代写（A）+ 派单注入（B）+ 契约门禁（C）
+
+### 为什么必须由中枢代写
+
+实测（2026-11-20）：
+
+| 现象 | 证据 |
+|---|---|
+| 席位写不了共享 outbox | codex exec --sandbox read-only → outbox_unavailable: attempt to write a readonly database（exit=2） |
+| 席位不会主动 recall | 不提示时它去读源码作答，回复「无法确认当前是否实际正常运行」 |
+| hub 慢导致派发失败 | hub.state 1.3–6.4s → 心跳 2s 超时 → INTERFACE_STALE（codex 278 次）→ delivery_failed |
+
+### A：中枢代写
+
+席位在结果正文里输出：
+
+```text
+MEMORY_INTENT 开标签 {"kind":"milestone","subject":"...","claim":"...","evidence_level":"E1","evidence":"..."} 闭标签
+```
+
+（实际写法是双方括号包住的 MEMORY_INTENT 块，见 stage2/memory_bridge.py 的 BLOCK_OPEN。）
+
+hub 在 result_ready 时读取结果文件（≤512KB）、解析块、校验后入 outbox，source_agent 记为席位。
+不入图/不合法的块写 MEMORY_REJECTED 账本，不静默。
+
+### B：派单注入
+
+席位侧在编译 runtime 指令前按任务描述检索团队记忆，把命中事实追加到前言：
+
+```text
+【团队记忆·自动注入】-事实1；-事实2 【注入结束】
+```
+
+- 检索在 asyncio.to_thread 里跑，不阻塞心跳（第一版直接在事件循环里调，实测会拖慢心跳）；
+- 失败/无命中返回空串，不影响派发。
+
+### C：契约门禁
+
+任务契约新增可选 memory_intent_required: true。声明了却没有捕获到任何记忆块，on_verdict 直接
+memory_intent_missing 打回，不允许「跑完了但什么都没留下」静默通过。
+
+### 实测（E1）
+
+```text
+A：task 72e5add3 → 账本 MEMORY_CAPTURED seat:72e5add3-...:0 → outbox 行 delivered/graphiti/verified
+   同任务 verdict 通过（门禁看到记忆已捕获）
+B：task cc2dd09a → 席位回答「注入的 E1 证据显示 test_memory_*.py 全部通过」
+   该事实只存在于注入块，席位自己没有跑 recall
+C：单元 HC-5/6 覆盖打回与放行；HC-7 覆盖无契约不受影响
+```
+
+### 残留
+
+- codex 席位仍偶发 INTERFACE_STALE（历史问题）：心跳是 2s 超时的 request/response，中枢任何 >6s 的停顿都会触发；已修主因（账本全表扫描），未做隔离压测。
+- hub 目前只在 result_ready 时解析记忆块；席位把块写在别的文件里不会被采集（契约要求写在结果正文）。
+
 ## 11. 风险
 
 | 风险 | 处置 |

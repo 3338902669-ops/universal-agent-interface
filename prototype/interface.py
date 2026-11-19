@@ -23,6 +23,22 @@ from nats.aio.client import Client as NATS
 from nats.aio.msg import Msg
 
 from dispatch_contract import build_runtime_instruction
+
+
+def _recall_suffix(envelope: dict[str, Any]) -> str:
+    """B：派单前按任务描述取团队记忆，注入到 prompt 里。
+
+    不能指望席位自己想起 recall（实测 codex 会去读源码而不是查记忆）；
+    由中枢注入，席位不需要自觉也能站在团队事实上工作。
+    """
+    try:
+        from memory_bridge import recall_block
+    except Exception:
+        return ""
+    try:
+        return recall_block(str(envelope.get("instruction") or ""))
+    except Exception:
+        return ""
 from core import (
     CONTRACT_VERSION,
     AppendOnlyJsonl,
@@ -1124,7 +1140,10 @@ class InterfaceProcess:
             "--json",
             "-C",
             str(workdir),
-            build_runtime_instruction(envelope, self._preamble(envelope)),
+            build_runtime_instruction(
+                envelope,
+                self._preamble(envelope) + await asyncio.to_thread(_recall_suffix, envelope),
+            ),
         ]
         self.operation(
             task_id,
