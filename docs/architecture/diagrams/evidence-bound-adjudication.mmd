@@ -1,27 +1,24 @@
 flowchart LR
-  U["任务提出方<br/>验收目标与边界"] --> C["完整任务契约快照<br/>条件、禁项、工具范围"]
-  C --> H["生产 Hub（可选）<br/>首轮改用离线 harness"]
-  H --> E["执行席 / Agent<br/>执行并提交声明"]
+  U["任务提出方<br/>目标与边界"] --> C["完整任务契约<br/>验收条件、禁项、工具范围"]
+  C --> E["执行席 / Agent<br/>声明并提交原始产物"]
   E --> CL["执行声明<br/>命令、退出码、源码修订"]
-  E --> AR["原始产物字节<br/>包内 CAS + SHA-256"]
-  E --> RO["运行观察<br/>观察者与采集方法"]
-  E -. "可选外部能力<br/>首轮不验证" .-> AT["执行 Attestation<br/>信任根在 UAI 之外"]
-  C --> PK["冻结 Evidence Packet<br/>外层 profile + Evidence Record v1"]
+  E --> AR["原始产物字节<br/>SHA-256 manifest"]
+  E --> RO["运行观察<br/>观察者、方法、UTC 时间"]
+  C --> VF["核验席在冻结前填写<br/>逐项 checks、身份声明、共享依赖、裁定"]
+  CL --> VF
+  AR --> VF
+  RO --> VF
+  C --> PK["冻结 Evidence Packet<br/>任务契约 + 执行证据 + 核验记录 + 裁定"]
   CL --> PK
   AR --> PK
   RO --> PK
-  AT -. "若存在则引用" .-> PK
-  OS --> PK
-  PK --> CV["纯函数确定性校验<br/>schema、绑定、哈希、路径、重放"]
-  CV -- "结构有效" --> VR["核验席<br/>读取只读冻结快照"]
-  PK -- "只读、固定摘要" --> VR
-  CV -- "拒绝 / 信息不足" --> AD["裁定映射<br/>通过 / 带注通过 / 条件通过 / 不通过 / 未核 / 作废"]
-  VR --> IR["核验记录<br/>逐项结果、理由、访问与共享依赖"]
-  IR --> AD
-  PK --> AD
-  AD --> LG["只追加裁定事件<br/>packet digest + 规则版本"]
-  LG --> RP["离线复算<br/>重建裁定并列差异"]
-  AR -. "字节随包冻结" .-> OS["本地内容寻址 bundle<br/>只读字节；无网络/包根外路径"]
-
+  VF --> PK
+  PK --> LD["只读离线加载器<br/>路径、链接、文件类型与字节"]
+  AR --> FS["冻结 bundle 文件目录"]
+  FS --> LD
+  LD --> CV["确定性重放器<br/>schema、绑定、摘要、引用与已存裁定"]
+  CV --> OUT["可复查输出<br/>结果、原因、packet digest"]
+  PK -. "未来扩展；本轮未实现" .-> LG["包外 ledger envelope<br/>packet digest + prev_digest"]
+  AT["可信执行 attestation<br/>外部信任根；v0.1 未实现"]
   classDef caveat fill:#fff3cd,stroke:#c58a00,color:#332900;
-  class AT caveat;
+  class AT,LG caveat;
