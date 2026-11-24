@@ -109,10 +109,10 @@
 | 缺少发现到修订的闭环表 | 本表逐项记录首轮七项发现及第二轮新增修正 | DSH 下一轮只读复阅待回执 |
 | 图示暗示运行时生成/回写核验与裁定 | 图示改成冻结前由外部核验流程提供记录，冻结后单向加载与重放 | 嵌入图与独立 MMD 文本一致（换行符归一后）；DSH 第三轮复核通过 |
 | 四份文档状态不一致，发布清单含糊 | 四份状态统一；明确只推送计划/执行计划/架构/Mermaid 四文件 | DSH 第三轮复核通过 |
-| completeness 与 schema/loader 前置关系未明 | 定义增加“schema 解析与 loader 成功”前提 | 112/120 数值不变；措辞待下一轮复阅 |
+| completeness 与 schema/loader 前置关系未明 | 定义增加“schema 解析与 loader 成功”前提 | DSH 第三轮确认定义、summary 与报告一致 |
 | 天枢阻塞声明缺少可寻址输出锚点 | 已列原始 stdout 路径与 SHA-256；说明 result.json 缺失 | `C:\Users\33389\.shared\comms-v2\cutover-base-20261109\runtime\interfaces\tianshu\results\25b0a037-6a4b-47a7-b1c6-8fe5df532dc2\runtime.stdout.jsonl` SHA256 `6f57308a6493ba37372b6939bdda86497a5582a5f5a1a97cb5deaa63e5796869` |
 | expected_integrity 与 spec 重复手写 | generator 改为读取 `SPEC.expected_integrity[group]` | 33 项单测；spec/oracle 哈希与 summary 一致 |
-| canonicalizer hash 易被理解为实现代码 hash | 报告注明它固定规范描述，实现由 `rules_source_sha256` 固定 | 报告已注明；待下一轮复阅 |
+| canonicalizer hash 易被理解为实现代码 hash | 报告注明它固定规范描述，实现由 `rules_source_sha256` 固定 | DSH 第三轮确认报告与架构说明一致 |
 
 DSH 第三轮终审 task `d6bd53ce-64f8-4984-821f-4680aa0e8b51`：PASS、无阻断；仅剩 Mermaid 字节换行表述（已改为文本一致）和 Task 5 勾选状态（已改为完成）两项文档细节。回执：`C:\Users\33389\.shared\comms-v2\cutover-base-20261109\runtime\interfaces\dsh\results\d6bd53ce-64f8-4984-821f-4680aa0e8b51\result.json` SHA-256 `ffe4ef962f0cd43ff88a9b45a9d2fc84252a840941e24b2bc63c7e62613737d4`。此为 DSH 文档复核，不等于 TianShu 独立代码/运行验收。
 
